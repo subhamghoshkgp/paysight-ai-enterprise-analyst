@@ -44,7 +44,7 @@ Viewed by bank, Northstar contributed **−5.49 pp through its within-bank rate 
 ```mermaid
 flowchart TD
     Q["Business question and sidebar filters"] --> O["Offline interpreter"]
-    Q --> M["Optional OpenAI planner"]
+    Q --> M["Optional Groq or OpenAI planner"]
     O --> P["Validated metric and cohort plan"]
     M --> P
     P --> S["Compile and validate parameterized SQL"]
@@ -75,6 +75,19 @@ SQLite supplies the native read-authorizer and read-only mode in a portable sing
 | What was the average transaction value for Wallet last week? | Successful Wallet value divided by successful Wallet attempts |
 
 The sidebar supplies default dates. “Last week” means the trailing seven dates ending at the selected end date. The synthetic snapshot ends on a Sunday, so the flagship demo compares two full Monday–Sunday weeks. Relative dates are independent of the computer clock. Explicit ISO dates in a question override the sidebar dates. A period comparison uses an adjacent, equally long preceding window. Sidebar and question cohort filters intersect. Inspect the resolved window and filter bindings in **Query evidence**.
+
+### Guided investigations and Groq
+
+Choose **AI analyst** and run the default weekly-decline question. Enter **Only UPI** as a follow-up, then **Which bank contributed most?** The drill-down keeps the dates and filters. For a decline it ranks the most negative total contribution (mix plus within) to the selected cohort. A new business question starts a fresh analysis. Each observed finding opens its supporting aggregate rows, SQL and bound parameters. The data-quality page distinguishes missing reasons in the selected cohort from the snapshot-wide check.
+
+To enable **Groq · assisted**, enter the following in the deployed app’s Streamlit settings under **Secrets**, or in a local, git-ignored `.streamlit/secrets.toml`:
+
+```toml
+GROQ_API_KEY = "<your Groq key>"
+GROQ_MODEL = "openai/gpt-oss-20b"
+```
+
+Server environment variables with the same names also work. Select **Groq · assisted** in the sidebar. Groq receives the question, analytical catalog, allowed filter labels and dates. A model-assisted follow-up also receives the prior plan. A second request can order verified observations for the brief. SQL compilation, execution, numeric calculations and evidence assembly run locally. The bundled follow-up shortcuts resolve locally even in assisted mode. If planning fails, select **Offline · deterministic** and rerun. If only the brief fails, the app displays the verified findings.
 
 ### Optional OpenAI mode
 

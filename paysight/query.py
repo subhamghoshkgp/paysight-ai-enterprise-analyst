@@ -36,6 +36,7 @@ def compile_query(plan, dimension):
     sql = f"""SELECT {period} AS period, {group} AS segment,
        COUNT(*) AS attempts,
        SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS successes,
+       SUM(CASE WHEN status = 'FAILED' AND reason = 'Unknown' THEN 1 ELSE 0 END) AS missing_reasons,
        SUM(CASE WHEN status = 'SUCCESS' THEN paise ELSE 0 END) AS successful_paise
 FROM eligible
 WHERE {" AND ".join(where)}

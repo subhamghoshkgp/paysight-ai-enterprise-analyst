@@ -2,6 +2,7 @@ import os
 import sqlite3
 from dataclasses import replace
 from datetime import timedelta
+from functools import partial
 
 import pandas as pd
 import plotly.express as px
@@ -10,7 +11,7 @@ import streamlit as st
 from paysight.analyst import analyze, fmt
 from paysight.data import BANKS, END, METHODS, START, build, quality
 from paysight.model import executive_brief, model_plan
-from paysight.plans import METRICS, QUESTIONS, Plan, interpret
+from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, follow_up, interpret, narrow
 
 st.set_page_config(
     page_title="PaySight AI · Payment intelligence", page_icon="◈", layout="wide"
@@ -64,6 +65,7 @@ with st.sidebar:
     mode = st.selectbox(
         "Analysis engine",
         ["Offline · deterministic"]
+        + (["Groq · assisted"] if os.getenv("GROQ_API_KEY") else [])
         + (["OpenAI · assisted"] if os.getenv("OPENAI_API_KEY") else []),
     )
     with st.expander("Metric definitions"):
@@ -78,13 +80,33 @@ filters = tuple((k, tuple(v)) for k, v in [("method", method), ("bank", banks)] 
 
 
 def scoped(p):
-    combined = dict(p.filters)
-    for k, values in filters:
-        choices = tuple(v for v in values if k not in combined or v in combined[k])
-        if not choices:
-            raise ValueError("The question conflicts with a sidebar filter.")
-        combined[k] = choices
-    return replace(p, filters=tuple(combined.items())).validate()
+    return narrow(p, filters)
+
+
+def scope_label(p):
+    return " · ".join(f"{k.title()} = {', '.join(v)}" for k, v in p.filters) or "All eligible attempts"
+
+
+def claim_evidence(r, index):
+    dim, period, segment = r["sources"][index]
+    trace = next(t for t in r["traces"] if t["dimension"] == dim)
+    with st.expander(f"View evidence · Finding {index + 1} · {trace['id']}"):
+        p = r["plan"]
+        st.caption(f"Source: eligible · {scope_label(p)} · Current {p.start} to {p.end}")
+        if p.intent != "summary" and period is None:
+            st.caption(f"Previous {p.previous} to {p.start - timedelta(days=1)}")
+        st.caption(METRICS[p.metric][2])
+        rows = r["frames"][dim]
+        if period:
+            rows = rows[rows.period == period]
+        if segment is not None:
+            rows = rows[rows.segment == segment]
+        st.dataframe(rows, hide_index=True)
+        if dim in r["lenses"] and period is None:
+            st.caption("Derived from the rows above. Mix holds prior segment rates fixed. Within uses current segment shares.")
+            st.dataframe(r["lenses"][dim].style.format(precision=2), width="stretch")
+        st.code(trace["sql"], language="sql")
+        st.write("Bound parameters", trace["parameters"])
 
 
 def evidence(r):
@@ -136,7 +158,18 @@ def chart(df, x, y, title, unit, line=False, color=None):
     st.plotly_chart(fig, width="stretch")
 
 
+def cohort_quality(r):
+    current = r["totals"].loc[r["totals"].period == "Current"].iloc[0]
+    missing, failures = int(current.missing_reasons), int(current.failures)
+    text = f"Selected cohort: {missing:,} of {failures:,} failed attempts have a missing reason."
+    if missing:
+        st.warning(text + " They count toward the failure rate and appear under Unknown in the reason breakdown.")
+    else:
+        st.caption(text)
+
+
 def caveats(r):
+    cohort_quality(r)
     n = int(r["grouped"].attempts.min())
     st.caption(
         f"Snapshot quality: {len(report['Duplicates'])} duplicate copies removed · {report['Pending']} pending attempts excluded · {len(report['Missing failure reasons'])} missing decline reasons retained as Unknown. Smallest returned group: {n:,} eligible attempts. These are descriptive snapshot measurements. Small cohorts can fluctuate sharply."
@@ -206,7 +239,17 @@ try:
         evidence(r)
     elif page == "Data quality":
         st.title("Data quality")
-        st.caption("Snapshot-wide checks · before dashboard filters")
+        st.subheader("Selected cohort")
+        active = scoped(Plan("failures", "all", "summary", start, end))
+        st.caption(f"{active.start} to {active.end} · {scope_label(active)}")
+        try:
+            cohort_result = run(active)
+        except ValueError as exc:
+            st.info(str(exc))
+        else:
+            cohort_quality(cohort_result)
+        st.subheader("Full snapshot")
+        st.caption(f"{START} to {END} · all banks and methods")
         a, b, c, d = st.columns(4)
         for col, k in zip(
             (a, b, c, d),
@@ -250,41 +293,74 @@ try:
         question = st.text_input(
             "Business question", value=QUESTIONS[0], key="question", max_chars=700
         )
+        ranking = None
+        if ambiguous_bank_ranking(question):
+            ranking = st.radio(
+                "How should banks be ranked?", ["Lowest success rate", "Most failed attempts"],
+                index=None, key="ranking_basis",
+            )
         submit = st.button("Run analysis", type="primary")
-        context = (question, selected, filters, mode)
+        context = (question, selected, filters, mode, ranking)
+        provider = mode.split(" · ")[0]
+        planner = None if provider == "Offline" else partial(model_plan, provider=provider)
+        answer = st.session_state.get("answer")
+        if answer and answer["context"] != context:
+            st.session_state.pop("answer", None)
+            answer = None
+
+        def save_result(plan, prompt, label):
+            result = run(scoped(plan))
+            brief, warning = "", ""
+            if planner:
+                try:
+                    brief = executive_brief(prompt, result["facts"], provider)
+                except ValueError as exc:
+                    warning = str(exc)
+            st.session_state.answer = dict(
+                context=context, result=result, brief=brief, warning=warning,
+                prompt=prompt, planner=label,
+            )
+
         if submit:
             st.session_state.pop("answer", None)
+            if ambiguous_bank_ranking(question) and not ranking:
+                st.info("Choose the ranking measure above, then run the analysis.")
+                st.stop()
+            prompt = question
+            if ranking:
+                prompt = question.lower().replace("performed", "").replace("performing", "").replace("worst", "")
+                prompt = prompt + (" lowest success rate" if ranking == "Lowest success rate" else " most failed attempts")
             with st.spinner("Resolving the question and running validated queries…"):
-                p = scoped(
-                    (model_plan if mode.startswith("OpenAI") else interpret)(
-                        question, start, end
-                    )
-                )
-                r = run(p)
-                brief = ""
-                if mode.startswith("OpenAI"):
-                    try:
-                        brief = executive_brief(question, r["facts"])
-                    except ValueError as exc:
-                        st.warning(str(exc))
-                st.session_state.answer = (context, r, brief)
-        if "answer" in st.session_state and st.session_state.answer[0] == context:
-            _, r, brief = st.session_state.answer
+                plan = (planner or interpret)(prompt, start, end)
+                save_result(plan, question, provider)
+        answer = st.session_state.get("answer")
+        if answer:
+            with st.form("followup_form", clear_on_submit=True):
+                follow = st.text_input("Follow-up question", placeholder="Within UPI, which bank contributed most?", max_chars=700)
+                drill = st.form_submit_button("Run follow-up")
+            if drill:
+                try:
+                    next_plan = follow_up(follow, answer["result"]["plan"], planner)
+                    save_result(next_plan, follow, "Scoped follow-up")
+                    answer = st.session_state.answer
+                except ValueError as exc:
+                    st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")
+            r, brief = answer["result"], answer["brief"]
             p = r["plan"]
             st.subheader("Executive summary")
+            st.caption(answer["prompt"])
             st.write(brief or r["facts"][0])
-            st.caption(f"{p.start} – {p.end} · {mode} · {METRICS[p.metric][2]}")
+            st.caption(f"{p.start} – {p.end} · {scope_label(p)} · {answer['planner']} · {METRICS[p.metric][2]}")
+            if answer["warning"]:
+                st.warning(answer["warning"] + " Showing executed results.")
             if p.intent != "summary":
                 st.caption(
                     f"Compared with {p.previous} – {p.start - timedelta(days=1)}"
                 )
             st.subheader("Observed facts")
-            for fact in r["facts"][0 if brief else 1 :]:
-                st.write("• " + fact)
-            if len(r["facts"]) == 1:
-                st.write(
-                    "Eligible attempts and successful attempts are shown in the evidence table below."
-                )
+            for index, fact in enumerate(r["facts"]):
+                st.write(f"{index + 1}. {fact}")
+                claim_evidence(r, index)
             frame = (
                 r["grouped"].sort_values(p.metric, ascending=p.ascending)
                 if p.dimension != "day"
@@ -310,7 +386,7 @@ try:
             if r["lenses"]:
                 st.subheader("What drove the change?")
                 st.caption(
-                    "Each tab explains the same portfolio change from a different angle. Contributions across tabs overlap."
+                    "Each tab explains the same selected cohort change from a different angle. Contributions across tabs overlap."
                 )
                 for tab, (dim, table) in zip(
                     st.tabs(["Payment method", "Bank", "Merchant category", "Region"]),

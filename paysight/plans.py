@@ -1,7 +1,7 @@
 """Shared contract for the offline parser, optional model and SQL compiler."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from .data import BANKS, CATEGORIES, END, METHODS, REGIONS, START
@@ -75,6 +75,11 @@ class Plan:
             ):
                 raise ValueError("Unsupported filter.")
         return self
+
+    def as_context(self):
+        return dict(metric=self.metric, dimension=self.dimension, intent=self.intent,
+                    start=str(self.start), end=str(self.end), filters=dict(self.filters),
+                    ascending=self.ascending)
 
     @property
     def previous(self):
@@ -197,3 +202,47 @@ def interpret(question, start, end):
         tuple(filters),
         bool(re.search("lowest|worst|smallest|bottom", q)),
     ).validate()
+
+def narrow(plan, filters):
+    """Intersect scope, including filters set by the sidebar or a parent analysis."""
+    combined = dict(plan.filters)
+    for key, values in filters:
+        choices = tuple(v for v in values if key not in combined or v in combined[key])
+        if not choices:
+            raise ValueError("The requested cohort conflicts with the active filters.")
+        combined[key] = choices
+    return replace(plan, filters=tuple(combined.items())).validate()
+
+
+def follow_up(question, previous, planner=None):
+    """Apply common drill-downs exactly. More general follow-ups may use a provider."""
+    q = question.strip().lower().rstrip("?.!").strip()
+    cohort = re.fullmatch(r"(?:only|within|just|filter to) (.+?)(?: only)?", q)
+    if cohort:
+        for key, values in VALUES.items():
+            for value in values:
+                if value.lower() == cohort[1]:
+                    return narrow(previous, ((key, (value,)),))
+    contribution = re.fullmatch(
+        r"(?:within (.+?),\s*)?which (bank|method|region|category) contributed most"
+        r"(?: to (?:the |this )?(?:decline|drop|change))?", q
+    )
+    if contribution:
+        if previous.metric != "success_rate" or previous.intent == "summary":
+            raise ValueError("Start with a comparison of success rates across two periods.")
+        plan = replace(previous, dimension=contribution[2], intent="investigate")
+        if contribution[1]:
+            return follow_up("only " + contribution[1], plan)
+        return plan.validate()
+    if planner:
+        candidate = planner(question, previous.start, previous.end, previous=previous)
+        if (candidate.start, candidate.end) != (previous.start, previous.end):
+            raise ValueError("Use a new business question to change the comparison dates.")
+        return narrow(candidate, previous.filters)
+    raise ValueError("Try ‘Only UPI’ or ‘Which bank contributed most?’, or start a new question.")
+
+
+def ambiguous_bank_ranking(question):
+    q = question.lower()
+    return (bool(re.search(r"\bbanks?\b", q) and re.search(r"\bworst\b", q))
+            and not re.search(r"rate|count|volume|value|amount|attempt|failure|success|timeout", q))

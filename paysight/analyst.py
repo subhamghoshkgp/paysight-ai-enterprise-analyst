@@ -49,9 +49,15 @@ def fmt(metric, x):
 def analyze(path, plan):
     plan.validate()
     traces = []
+    frames = {}
+    sources = []
 
     def read(dim):
+        if dim in frames:
+            return frames[dim]
         frame, trace = execute(path, plan, dim)
+        frames[dim] = frame
+        trace["id"] = f"Q{len(traces) + 1}"
         traces.append(trace)
         return frame
 
@@ -72,16 +78,19 @@ def analyze(path, plan):
     facts = [
         f"{name}: {fmt(metric, current[metric])} across {current.attempts:,} eligible attempts."
     ]
-    if plan.dimension != "all" and not ranked.empty:
+    sources.append(("all", "Current", None))
+    if plan.dimension != "all" and plan.intent != "investigate" and not ranked.empty:
         row = ranked.iloc[0]
         facts.append(
             f"{row.segment} had the {'lowest' if plan.ascending else 'highest'} {name.lower()} ({fmt(metric, row[metric])}) in the current window."
         )
+        sources.append((plan.dimension, "Current", row.segment))
     lenses = {}
     if plan.intent != "summary":
         old = totals[totals.period == "Previous"].iloc[0]
         diff = current[metric] - old[metric]
         change = f"{diff:+.2f} pp" if metric.endswith("_rate") else fmt(metric, diff)
+        sources.insert(0, ("all", None, None))
         facts.insert(
             0,
             f"{name} moved from {fmt(metric, old[metric])} to {fmt(metric, current[metric])} ({change}).",
@@ -95,11 +104,22 @@ def analyze(path, plan):
         facts.append(
             f"Payment-method mix accounted for {bymethod['Mix (pp)'].sum():+.2f} pp. Changes within methods accounted for {bymethod['Within (pp)'].sum():+.2f} pp."
         )
-        bank = lenses["bank"]["Within (pp)"].idxmin()
+        sources.append(("method", None, None))
+        bank_effects = lenses["bank"]["Within (pp)"]
+        bank = bank_effects.idxmin() if diff <= 0 else bank_effects.idxmax()
         shift = lenses["bank"].loc[bank, "Within (pp)"]
         facts.append(
-            f"In the bank breakdown, {bank} had the smallest within-bank contribution ({shift:+.2f} pp)."
+            f"In the bank breakdown, {bank} had the {'smallest' if diff <= 0 else 'largest'} within-bank contribution ({shift:+.2f} pp)."
         )
+        sources.append(("bank", None, None))
+        if plan.dimension in LENSES:
+            effects = lenses[plan.dimension]["Total (pp)"]
+            driver = effects.idxmin() if diff <= 0 else effects.idxmax()
+            facts.insert(0, f"By {plan.dimension}, {driver} had the "
+                         f"{'smallest' if diff <= 0 else 'largest'} total contribution "
+                         f"({effects[driver]:+.2f} pp, mix plus within-segment change) "
+                         "to the selected cohort’s success-rate change.")
+            sources.insert(0, (plan.dimension, None, None))
         hypothesis = f"Routing or authorization changes at {bank} could explain its observed movement. Processor logs would be needed to test this."
         action = f"Compare {bank}'s timeout and authorization logs across the two windows, then check whether its method mix also changed."
     return dict(
@@ -108,6 +128,8 @@ def analyze(path, plan):
         grouped=grouped,
         lenses=lenses,
         facts=facts,
+        sources=sources,
+        frames=frames,
         hypothesis=hypothesis,
         action=action,
         traces=traces,
