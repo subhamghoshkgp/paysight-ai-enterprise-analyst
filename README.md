@@ -107,7 +107,7 @@ The fixed seed is 412. The 42-day snapshot spans **5 Oct–15 Nov 2026**. All me
 | attempts | One record per transaction ID, retaining the first ingested row. |
 | eligible | Joined analytical view restricted to successful and failed attempts. |
 
-Across the snapshot 42,114 raw rows yield 42,090 unique attempts. The 624 pending attempts are excluded. Fifteen failures lack a reason and appear under **Unknown**. The quality page uses the whole snapshot even when the analysis window is narrowed.
+Across the snapshot 42,114 raw rows yield 42,090 unique attempts. The 624 pending attempts are excluded. Fifteen failures lack a reason and appear under **Unknown**. The quality page shows the selected cohort’s missing-reason count alongside the full-snapshot checks.
 
 | Metric | Definition |
 |---|---|

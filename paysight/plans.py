@@ -203,6 +203,7 @@ def interpret(question, start, end):
         bool(re.search("lowest|worst|smallest|bottom", q)),
     ).validate()
 
+
 def narrow(plan, filters):
     """Intersect scope, including filters set by the sidebar or a parent analysis."""
     combined = dict(plan.filters)
@@ -217,6 +218,8 @@ def narrow(plan, filters):
 def follow_up(question, previous, planner=None):
     """Apply common drill-downs exactly. More general follow-ups may use a provider."""
     q = question.strip().lower().rstrip("?.!").strip()
+    if not q:
+        raise ValueError("Enter a follow-up question.")
     cohort = re.fullmatch(r"(?:only|within|just|filter to) (.+?)(?: only)?", q)
     if cohort:
         for key, values in VALUES.items():

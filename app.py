@@ -100,7 +100,8 @@ def claim_evidence(r, index):
         if period:
             rows = rows[rows.period == period]
         if segment is not None:
-            rows = rows[rows.segment == segment]
+            st.caption(f"Ranked segment: {segment}. All comparison rows are shown.")
+            rows = rows.sort_values(p.metric, ascending=p.ascending)
         st.dataframe(rows, hide_index=True)
         if dim in r["lenses"] and period is None:
             st.caption("Derived from the rows above. Mix holds prior segment rates fixed. Within uses current segment shares.")
@@ -304,7 +305,7 @@ try:
         provider = mode.split(" · ")[0]
         planner = None if provider == "Offline" else partial(model_plan, provider=provider)
         answer = st.session_state.get("answer")
-        if answer and answer["context"] != context:
+        if answer and (not isinstance(answer, dict) or answer.get("context") != context):
             st.session_state.pop("answer", None)
             answer = None
 
@@ -341,7 +342,7 @@ try:
             if drill:
                 try:
                     next_plan = follow_up(follow, answer["result"]["plan"], planner)
-                    save_result(next_plan, follow, "Scoped follow-up")
+                    save_result(next_plan, follow, f"{provider} · scoped follow-up")
                     answer = st.session_state.answer
                 except ValueError as exc:
                     st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")

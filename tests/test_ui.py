@@ -57,3 +57,24 @@ def test_clarifies_bank_ranking():
     assert not app.error and not app.exception
     plan = app.session_state.answer["result"]["plan"]
     assert (plan.metric, plan.dimension, plan.ascending) == ("failures", "bank", False)
+
+
+def test_groq_brief_failure_preserves_evidence(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "offline-test-fixture")
+
+    def answer(instructions, payload, provider):
+        assert provider == "Groq"
+        if "observations" in payload:
+            raise ValueError("Groq reached its rate limit.")
+        return dict(metric="success_rate", dimension="all", intent="investigate",
+                    start="2026-11-09", end="2026-11-15", filters={}, ascending=False)
+
+    monkeypatch.setattr("paysight.model.ask", answer)
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.radio[0].set_value("AI analyst").run()
+    engine = next(box for box in app.selectbox if box.label == "Analysis engine")
+    engine.set_value("Groq · assisted").run()
+    app.button[0].click().run()
+    assert not app.exception and not app.error
+    assert any("rate limit" in warning.value for warning in app.warning)
+    assert app.code and "86.59%" in app.session_state.answer["result"]["facts"][0]
