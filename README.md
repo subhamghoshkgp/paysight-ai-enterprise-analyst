@@ -6,8 +6,6 @@ PaySight analyzes payment performance using natural-language questions. It repor
 
 **Dataset.** The application uses 364,266 synthetic payment attempts across 48 merchants and four fictional banks, covering 16 November 2025 through 15 November 2026. [Download the three CSVs (ZIP)](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/raw/refs/heads/main/data/paysight-payments-v2.zip) · [Data dictionary, generation method and worked example](data/README.md)
 
-![Payment success and the two components of its decline](docs/method-attribution.png)
-
 ## Run locally
 
 Use Python 3.12. From the project root, create an environment and start the application. First launch builds the seeded database automatically and requires write access to the project’s data directory.
