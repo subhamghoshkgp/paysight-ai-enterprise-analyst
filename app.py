@@ -2,7 +2,6 @@ import os
 import sqlite3
 from dataclasses import replace
 from datetime import timedelta
-from functools import partial
 
 import pandas as pd
 import plotly.express as px
@@ -10,8 +9,8 @@ import streamlit as st
 
 from paysight.analyst import analyze, fmt
 from paysight.data import BANKS, END, METHODS, START, build, quality
-from paysight.model import executive_brief, model_plan
-from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, follow_up, interpret, narrow
+from paysight.model import executive_brief
+from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, follow_up, interpret, narrow, needs_explanation
 
 st.set_page_config(
     page_title="PaySight AI · Payment intelligence", page_icon="◈", layout="wide"
@@ -31,19 +30,19 @@ border-radius:10px;padding:16px 18px;height:100%}
 
 
 @st.cache_resource
-def snapshot():
+def snapshot(start=START, end=END):
     path = build()
     return path, quality(path)
 
 
 # Streamlit hashes this wrapper independently of the imported analysis implementation.
 # Bump this version when the cached result format or its calculations change.
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 
 
 @st.cache_data(max_entries=128)
 def cached_analysis(plan, version):
-    return analyze(snapshot()[0], plan)
+    return analyze(snapshot(START, END)[0], plan)
 
 
 def run(plan):
@@ -51,7 +50,7 @@ def run(plan):
 
 
 try:
-    path, report = snapshot()
+    path, report = snapshot(START, END)
 except (OSError, sqlite3.Error):
     st.error(
         "The payment snapshot could not be opened. Check the data directory and its permissions."
@@ -61,7 +60,7 @@ except (OSError, sqlite3.Error):
 with st.sidebar:
     st.header("◈  PaySight AI")
     st.caption("Enterprise payments intelligence")
-    page = st.radio("Workspace", ["Overview", "AI analyst", "Data quality"])
+    page = st.radio("Workspace", ["Overview", "AI analyst"])
     st.divider()
     selected = st.date_input(
         "Analysis window",
@@ -71,16 +70,10 @@ with st.sidebar:
     )
     method = st.multiselect("Payment method", METHODS)
     banks = st.multiselect("Bank", BANKS)
-    mode = st.selectbox(
-        "Analysis engine",
-        ["Offline · deterministic"]
-        + (["Groq · assisted"] if os.getenv("GROQ_API_KEY") else [])
-        + (["OpenAI · assisted"] if os.getenv("OPENAI_API_KEY") else []),
-    )
     with st.expander("Metric definitions"):
         for label, _, definition in METRICS.values():
             st.caption(f"{label} · {definition}")
-    st.caption(f"Synthetic snapshot · {START:%d %b} – {END:%d %b %Y}")
+    st.caption(f"Synthetic snapshot · {START:%d %b %Y} – {END:%d %b %Y}")
 if len(selected) != 2:
     st.info("Choose both the start and end dates.")
     st.stop()
@@ -247,52 +240,41 @@ try:
             )
         caveats(r)
         evidence(r)
-    elif page == "Data quality":
-        st.title("Data quality")
-        st.subheader("Selected cohort")
-        active = scoped(Plan("failures", "all", "summary", start, end))
-        st.caption(f"{active.start} to {active.end} · {scope_label(active)}")
-        try:
-            cohort_result = run(active)
-        except ValueError as exc:
-            st.info(str(exc))
-        else:
-            cohort_quality(cohort_result)
-        st.subheader("Full snapshot")
-        st.caption(f"{START} to {END} · all banks and methods")
-        a, b, c, d = st.columns(4)
-        for col, k in zip(
-            (a, b, c, d),
-            ("Raw rows", "Unique attempts", "Pending", "Orphan references"),
-        ):
-            col.metric(k, f"{report[k]:,}")
-        st.warning(
-            f"{len(report['Duplicates'])} duplicated transaction IDs · first ingested copy retained"
-        )
-        st.write(
-            "Repeated attempts would inflate volume and could shift rates. The generator inserts one identical extra copy per affected ID."
-        )
-        st.dataframe(
-            pd.DataFrame(
-                report["Duplicates"], columns=["Transaction ID", "Raw copies"]
-            ),
-            hide_index=True,
-        )
-        st.warning(
-            f"{len(report['Missing failure reasons'])} failed attempts have a missing reason"
-        )
-        st.write(
-            "These attempts count toward the failure rate. The reason breakdown groups them under Unknown."
-        )
-        st.dataframe(
-            pd.DataFrame(
-                report["Missing failure reasons"], columns=["Affected transaction ID"]
-            ),
-            hide_index=True,
-        )
+        with st.expander("Data quality · full snapshot"):
+            st.caption(f"{START} to {END} · all banks and methods")
+            a, b, c, d = st.columns(4)
+            for col, k in zip(
+                (a, b, c, d),
+                ("Raw rows", "Unique attempts", "Pending", "Orphan references"),
+            ):
+                col.metric(k, f"{report[k]:,}")
+            st.warning(
+                f"{len(report['Duplicates'])} duplicated transaction IDs · first ingested copy retained"
+            )
+            st.write(
+                "Repeated attempts would inflate volume and could shift rates. The generator inserts one identical extra copy per affected ID."
+            )
+            st.dataframe(
+                pd.DataFrame(
+                    report["Duplicates"], columns=["Transaction ID", "Raw copies"]
+                ),
+                hide_index=True,
+            )
+            st.warning(
+                f"{len(report['Missing failure reasons'])} failed attempts have a missing reason"
+            )
+            st.write(
+                "These attempts count toward the failure rate. The reason breakdown groups them under Unknown."
+            )
+            st.dataframe(
+                pd.DataFrame(
+                    report["Missing failure reasons"], columns=["Affected transaction ID"]
+                ),
+                hide_index=True,
+            )
     else:
         st.title("AI analyst")
-        st.caption("Ask your data. Understand your business.")
+        st.caption("Lookups and comparisons run directly in SQL. For a why question, Groq explains the SQL findings.")
 
         def use_example():
             st.session_state.question = st.session_state.example
@@ -310,25 +292,28 @@ try:
                 index=None, key="ranking_basis",
             )
         submit = st.button("Run analysis", type="primary")
-        context = (ANALYSIS_VERSION, question, selected, filters, mode, ranking)
-        provider = mode.split(" · ")[0]
-        planner = None if provider == "Offline" else partial(model_plan, provider=provider)
+        context = (ANALYSIS_VERSION, question, selected, filters, ranking)
         answer = st.session_state.get("answer")
         if answer and (not isinstance(answer, dict) or answer.get("context") != context):
             st.session_state.pop("answer", None)
             answer = None
 
-        def save_result(plan, prompt, label):
+        def save_result(plan, prompt, explain):
             result = run(scoped(plan))
             brief, warning = "", ""
-            if planner:
+            label = "Direct SQL"
+            if explain and os.getenv("GROQ_API_KEY"):
                 try:
-                    brief = executive_brief(prompt, result["facts"], provider)
+                    brief = executive_brief(prompt, result["facts"], "Groq")
+                    label = "SQL evidence + Groq explanation"
                 except ValueError as exc:
                     warning = str(exc)
+                    label = "SQL findings · Groq unavailable"
+            elif explain:
+                label = "SQL findings · Groq unconfigured"
             st.session_state.answer = dict(
                 context=context, result=result, brief=brief, warning=warning,
-                prompt=prompt, planner=label,
+                prompt=prompt, planner=label, explain=explain,
             )
 
         if submit:
@@ -341,8 +326,9 @@ try:
                 prompt = question.lower().replace("performed", "").replace("performing", "").replace("worst", "")
                 prompt = prompt + (" lowest success rate" if ranking == "Lowest success rate" else " most failed attempts")
             with st.spinner("Resolving the question and running validated queries…"):
-                plan = (planner or interpret)(prompt, start, end)
-                save_result(plan, question, provider)
+                explain = needs_explanation(prompt)
+                plan = interpret(prompt, start, end)
+                save_result(plan, question, explain)
         answer = st.session_state.get("answer")
         if answer:
             with st.form("followup_form", clear_on_submit=True):
@@ -350,8 +336,9 @@ try:
                 drill = st.form_submit_button("Run follow-up")
             if drill:
                 try:
-                    next_plan = follow_up(follow, answer["result"]["plan"], planner)
-                    save_result(next_plan, follow, f"{provider} · scoped follow-up")
+                    explain = needs_explanation(follow)
+                    next_plan = follow_up(follow, answer["result"]["plan"])
+                    save_result(next_plan, follow, explain)
                     answer = st.session_state.answer
                 except ValueError as exc:
                     st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")
@@ -373,7 +360,7 @@ try:
                 claim_evidence(r, index)
             frame = (
                 r["grouped"].sort_values(p.metric, ascending=p.ascending)
-                if p.dimension != "day"
+                if p.dimension not in ("day", "month")
                 else r["grouped"]
             )
             chart(
@@ -382,7 +369,7 @@ try:
                 p.metric,
                 METRICS[p.metric][0],
                 METRICS[p.metric][1],
-                p.dimension == "day",
+                p.dimension in ("day", "month"),
                 "period" if p.intent != "summary" else None,
             )
             st.dataframe(
@@ -408,13 +395,14 @@ try:
                             f"Mix {effects.iloc[0]:+.2f} pp  ·  Within segments {effects.iloc[1]:+.2f} pp"
                         )
                         st.dataframe(table.style.format(precision=2), width="stretch")
-            a, b = st.columns(2)
-            with a:
-                st.subheader("Hypothesis")
-                st.write(r["hypothesis"])
-            with b:
-                st.subheader("Recommended action")
-                st.write(r["action"])
+            if answer["explain"]:
+                a, b = st.columns(2)
+                with a:
+                    st.subheader("Hypothesis")
+                    st.write(r["hypothesis"])
+                with b:
+                    st.subheader("Recommended action")
+                    st.write(r["action"])
             caveats(r)
             evidence(r)
 except (ValueError, pd.errors.DatabaseError) as exc:

@@ -7,7 +7,8 @@ import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 
-START = date(2026, 10, 5)
+START = date(2025, 11, 16)
+DEMO_START = date(2026, 10, 5)
 END = date(2026, 11, 15)
 METHODS = ["UPI", "Credit Card", "Debit Card", "Net Banking", "Wallet"]
 BANKS = ["Meridian", "Northstar", "Cedar", "Rivermark"]
@@ -20,7 +21,7 @@ CATEGORIES = [
     "Healthcare",
     "E-commerce",
 ]
-DEFAULT = Path(__file__).resolve().parents[1] / "data" / "payments-v1.sqlite"
+DEFAULT = Path(__file__).resolve().parents[1] / "data" / "payments-v2.sqlite"
 
 
 def build(path=DEFAULT):
@@ -31,7 +32,6 @@ def build(path=DEFAULT):
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     os.close(fd)
     db = sqlite3.connect(tmp)
-    rng = random.Random(412)
     try:
         db.executescript("""
         CREATE TABLE merchants(id INTEGER PRIMARY KEY,name TEXT,category TEXT,region TEXT);
@@ -47,56 +47,64 @@ def build(path=DEFAULT):
                 for i in range(48)
             ],
         )
-        rows = []
-        for d in range((END - START).days + 1):
-            recent = d >= 35
-            for _ in range(rng.randint(930, 1070)):
-                i = len(rows) + 1
-                bank, merchant = rng.randrange(4), rng.randrange(48)
-                method = rng.choices(
-                    METHODS, [55, 18, 13, 8, 6] if recent else [23, 38, 22, 10, 7]
-                )[0]
-                risk = (
-                    0.025
-                    + 0.105 * (method == "UPI")
-                    + 0.045 * (merchant % 6 == 1)
-                    + 0.16 * (recent and bank == 1)
-                )
-                status = (
-                    "PENDING"
-                    if rng.random() < 0.015
-                    else ("FAILED" if rng.random() < risk else "SUCCESS")
-                )
-                reason = None
-                if status == "FAILED":
-                    reason = rng.choices(
-                        [
-                            "Bank timeout",
-                            "Insufficient funds",
-                            "Authentication failure",
-                            "Network error",
-                        ],
-                        [65 if recent and bank == 1 else 18, 35, 22, 15],
+        next_id = 1
+        missing = 0
+        duplicates = []
+        # Generate the original demo first so its IDs, counts and defects stay stable.
+        for first, last, seed in ((DEMO_START, END, 412), (START, DEMO_START - timedelta(days=1), 413)):
+            rng = random.Random(seed)
+            for offset in range((last - first).days + 1):
+                day = first + timedelta(days=offset)
+                day_text = day.isoformat()
+                recent = day >= END - timedelta(days=6)
+                batch = []
+                for _ in range(rng.randint(930, 1070)):
+                    bank, merchant = rng.randrange(4), rng.randrange(48)
+                    method = rng.choices(
+                        METHODS, [55, 18, 13, 8, 6] if recent else [23, 38, 22, 10, 7]
                     )[0]
-                rows.append(
-                    (
-                        i,
-                        (START + timedelta(days=d)).isoformat(),
-                        bank,
-                        merchant,
-                        method,
-                        status,
-                        rng.randint(1000, 420000),
-                        reason,
+                    risk = (
+                        0.025
+                        + 0.105 * (method == "UPI")
+                        + 0.045 * (merchant % 6 == 1)
+                        + 0.16 * (recent and bank == 1)
                     )
-                )
-        # Remove the reason from 15 distinct failed attempts before copying duplicates.
-        misses = [j for j, r in enumerate(rows) if r[5] == "FAILED"][:15]
-        for j in misses:
-            rows[j] = (*rows[j][:-1], None)
-        db.executemany(
-            "INSERT INTO raw_transactions VALUES(?,?,?,?,?,?,?,?)", rows + rows[:24]
-        )
+                    status = (
+                        "PENDING"
+                        if rng.random() < 0.015
+                        else ("FAILED" if rng.random() < risk else "SUCCESS")
+                    )
+                    reason = None
+                    if status == "FAILED":
+                        reason = rng.choices(
+                            [
+                                "Bank timeout",
+                                "Insufficient funds",
+                                "Authentication failure",
+                                "Network error",
+                            ],
+                            [65 if recent and bank == 1 else 18, 35, 22, 15],
+                        )[0]
+                    if status == "FAILED" and missing < 15:
+                        reason = None
+                        missing += 1
+                    batch.append(
+                        (
+                            next_id,
+                            day_text,
+                            bank,
+                            merchant,
+                            method,
+                            status,
+                            rng.randint(1000, 420000),
+                            reason,
+                        )
+                    )
+                    if next_id <= 24:
+                        duplicates.append(batch[-1])
+                    next_id += 1
+                db.executemany("INSERT INTO raw_transactions VALUES(?,?,?,?,?,?,?,?)", batch)
+        db.executemany("INSERT INTO raw_transactions VALUES(?,?,?,?,?,?,?,?)", duplicates)
         db.executescript("""
         CREATE INDEX raw_id ON raw_transactions(id);
         CREATE TABLE attempts AS SELECT * FROM raw_transactions WHERE rowid IN

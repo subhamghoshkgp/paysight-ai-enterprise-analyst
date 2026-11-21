@@ -9,16 +9,16 @@ APP = Path(__file__).resolve().parents[1] / "app.py"
 def test_evaluator_journey():
     app = AppTest.from_file(str(APP), default_timeout=15).run()
     assert not app.exception and not app.error
-    assert len(app.metric) == 4 and len(app.get("plotly_chart")) == 5
+    assert len(app.get("plotly_chart")) == 5
+    assert app.radio[0].options == ["Overview", "AI analyst"]
+    assert any(e.label.startswith("Data quality") for e in app.expander)
+    assert any("24 duplicated" in w.value for w in app.warning)
     app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
     assert not app.exception and not app.error
     assert len(set(block.value for block in app.code)) == 5 and len(app.tabs) == 4
     assert any(e.label.startswith("View evidence") for e in app.expander)
     assert any("94.22%" in e.value and "86.59%" in e.value for e in app.markdown)
-    app.radio[0].set_value("Data quality").run()
-    assert not app.exception and "24 duplicated" in app.warning[0].value
-    assert len(app.dataframe) == 2
 
 
 def test_invalid_question_clears_prior_result():
@@ -72,8 +72,6 @@ def test_groq_brief_failure_preserves_evidence(monkeypatch):
     monkeypatch.setattr("paysight.model.ask", answer)
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.radio[0].set_value("AI analyst").run()
-    engine = next(box for box in app.selectbox if box.label == "Analysis engine")
-    engine.set_value("Groq · assisted").run()
     app.button[0].click().run()
     assert not app.exception and not app.error
     assert any("rate limit" in warning.value for warning in app.warning)
@@ -89,3 +87,30 @@ def test_prior_release_answer_is_discarded():
     app.button[0].click().run()
     assert not app.error and not app.exception
     assert app.session_state.answer["result"]["sources"]
+
+def test_automatic_routing_with_a_configured_key(monkeypatch):
+    calls = []
+    monkeypatch.setenv("GROQ_API_KEY", "test-fixture")
+
+    def summarize(instructions, payload, provider):
+        assert provider == "Groq" and "observations" in payload
+        calls.append(payload["question"])
+        return {"order": [0]}
+
+    monkeypatch.setattr("paysight.model.ask", summarize)
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    app.radio[0].set_value("AI analyst").run()
+    prompt = app.text_input[0]
+    prompt.set_value("Show monthly transaction volume over the full history.").run()
+    app.button[0].click().run()
+    result = app.session_state.answer["result"]
+    assert not calls and len(result["grouped"]) == 13
+    assert result["grouped"].attempts.sum() == 358768
+    assert app.session_state.answer["planner"] == "Direct SQL"
+    why = "Why did our payment success rate drop last week?"
+    app.text_input[0].set_value(why).run()
+    app.button[0].click().run()
+    assert calls == [why] and app.session_state.answer["brief"]
+    app.text_input[1].set_value("Only UPI")
+    app.button[1].click().run()
+    assert calls == [why] and app.session_state.answer["planner"] == "Direct SQL"

@@ -60,10 +60,10 @@ def ask(instructions, payload, provider="OpenAI"):
             if error_code in ("model_permission_blocked_org", "model_permission_blocked_project"):
                 scope = "organization" if error_code.endswith("_org") else "project"
                 detail = f"reports that its {scope} settings block the configured model"
-        raise ValueError(f"{provider} {detail}. Retry or choose offline mode.") from exc
+        raise ValueError(f"{provider} {detail}. Retry or use the SQL evidence.") from exc
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
         raise ValueError(
-            "The model request failed or returned invalid JSON. Retry or choose offline mode."
+            "The model request failed or returned invalid JSON. Retry or use the SQL evidence."
         ) from exc
 
 
@@ -71,7 +71,7 @@ def model_plan(question, start, end, provider="OpenAI", previous=None):
     rules = """Translate the question to a payments analysis plan. Return JSON with metric, dimension, intent
 (summary, compare, investigate), start, end (ISO dates), filters (object mapping dimension to arrays of allowed
 values), ascending (boolean). Compare uses immediately preceding equal window. Investigate is for why success rate
-changed. Snapshot covers six weeks. 'Last week' means seven days ending at selected end. Use selected dates by default.
+changed. Use the supplied snapshot bounds. 'Last week' means seven days ending at selected end. Use selected dates by default.
 Merchant region is the region. GTV and ATV cover successful payments only. Unsupported questions, dimensions,
 filters, multiple unrelated requests or unclear denominators must return an error field. For a follow-up, prior_plan gives the resolved cohort and dates. Retain its scope. If the user asks which
 segment contributed to a success-rate change, use investigate with the requested dimension.

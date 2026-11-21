@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 import pytest
 
 from paysight.analyst import analyze
-from paysight.data import END, START, build
+from paysight.data import DEMO_START, END, build
 from paysight.model import executive_brief, model_plan
 from paysight.plans import QUESTIONS, follow_up, interpret
 
@@ -39,7 +39,7 @@ def test_upi_contribution_and_evidence(snapshot):
 def test_filtered_missing_reasons(snapshot):
     p = interpret(QUESTIONS[1], END, END)
     assert analyze(snapshot, p)["totals"].iloc[0].missing_reasons == 0
-    first = replace(p, start=START, end=START)
+    first = replace(p, start=DEMO_START, end=DEMO_START)
     defects = analyze(snapshot, first)["totals"].iloc[0].missing_reasons
     assert defects == 15
     upi = follow_up("Only UPI", first)

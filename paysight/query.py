@@ -17,6 +17,8 @@ def compile_query(plan, dimension):
     if dimension not in DIMS:
         raise ValueError("Unknown dimension")
     group = "'Portfolio'" if dimension == "all" else dimension
+    if dimension == "month":
+        group = "substr(day, 1, 7)"
     compare = plan.intent != "summary"
     period = (
         "CASE WHEN day < ? THEN 'Previous' ELSE 'Current' END"
@@ -91,6 +93,7 @@ def authorize(action, table, column, database, source):
         "count",
         "sum",
         "coalesce",
+        "substr",
     }:
         return sqlite3.SQLITE_OK
     if action == sqlite3.SQLITE_READ and (

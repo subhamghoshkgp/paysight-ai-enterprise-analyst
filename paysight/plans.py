@@ -1,5 +1,6 @@
 """Shared contract for the offline parser, optional model and SQL compiler."""
 
+import calendar
 import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
@@ -23,7 +24,7 @@ METRICS = {
         "Successful payment value / successful attempts",
     ),
 }
-DIMS = ("all", "bank", "method", "category", "region", "day", "reason")
+DIMS = ("all", "bank", "method", "category", "region", "day", "month", "reason")
 VALUES = {"bank": BANKS, "method": METHODS, "region": REGIONS, "category": CATEGORIES}
 QUESTIONS = [
     "Why did our payment success rate decline last week?",
@@ -37,6 +38,7 @@ QUESTIONS = [
     "Which regions have the highest transaction amounts?",
     "What are the main drivers of payment failures?",
     "What was the average transaction value for Wallet last week?",
+    "Show monthly transaction volume over the full history.",
 ]
 
 
@@ -86,13 +88,48 @@ class Plan:
         return self.start - (self.end - self.start) - timedelta(days=1)
 
 
+def needs_explanation(question):
+    return bool(re.search(
+        r"\b(why|explain|investigate|drivers?|caused?|root causes?|drove|behind|"
+        r"contributed most to (?:the |this )?(?:drop|decline|change)|"
+        r"contributed most(?=\s*[?!.]*$))\b", question.lower().strip()
+    ))
+
+
+def resolve_period(q, start, end):
+    """Translate calendar periods before the bounded metric parser checks vocabulary."""
+    if "over the full history" in q:
+        return q.replace("over the full history", ""), START, END
+    windows = {
+        "last month": (end.replace(day=1) - timedelta(days=1)).replace(day=1),
+        "this month": end.replace(day=1),
+        "yesterday": end - timedelta(days=1),
+        "today": end,
+    }
+    for phrase, first in windows.items():
+        if re.search(r"\b" + phrase + r"\b", q):
+            last = end.replace(day=1) - timedelta(days=1) if phrase == "last month" else end
+            return q.replace(phrase, ""), first, first if phrase == "yesterday" else last
+    for month in range(1, 13):
+        name = calendar.month_name[month].lower()
+        match = re.search(r"\b" + name + r" (\d{4})\b", q)
+        if match:
+            year = int(match[1])
+            first = date(year, month, 1)
+            last = first.replace(day=calendar.monthrange(year, month)[1])
+            return q[:match.start()] + q[match.end():], first, last
+    return q, start, end
+
+
 def interpret(question, start, end):
     q = question.lower().strip()
+    q, start, end = resolve_period(q, start, end)
+    q = re.sub(r"\bby month\b", "monthly", q)
     if (
         not q
         or len(q) > 700
         or re.search(
-            r"\b(delete|drop|insert|select|sql|update|attach|export|settlement|forecast|median|percentile|refund|yesterday|today|month|quarter|year|hourly|excluding|exclude|except|without|pending)\b|;",
+            r"\b(delete|insert|select|sql|update|attach|export|settlement|forecast|median|percentile|refund|yesterday|today|month|quarter|year|hourly|excluding|exclude|except|without|pending)\b|\bdrop\s+(?:table|view|index)\b|;",
             q,
         )
     ):
@@ -102,6 +139,7 @@ def interpret(question, start, end):
     # A bounded vocabulary prevents unknown cohort names from silently becoming portfolio queries.
     words = set(re.findall(r"[a-z]+", q))
     known = set(re.findall(r"[a-z]+", " ".join(QUESTIONS).lower()))
+    known.update("increase increased spike rose rise fall fell go down up behind drove cause causes failing why monthly lower higher".split())
     known.update(
         ["a", "an", "all", "at", "on", "in", "of", "between", "from", "through", "to", "by", "during", "per", "how", "many", "count", "counts", "total", "eligible", "successful", "successes", "attempts", "average", "mean", "gross", "value", "values", "atv", "gtv", "show", "me", "give", "us", "list", "rank", "ranked", "lowest", "highest", "worst", "best", "bottom", "smallest", "each", "day", "days", "trend", "over", "time", "past", "seven", "prior", "previous", "period", "week", "weeks", "versus", "vs", "compared", "compare", "change", "changed", "explain", "investigate", "caused", "approval", "percentage", "performance", "declined", "failed", "reason", "reasons", "region", "regionwide", "method", "methods", "bank", "segment", "segments", "category", "transaction", "merchant", "daily", "what", "which", "is", "are", "did", "does", "was", "were", "and", "for", "with", "please", "as", "paid", "payments", "most", "fewest", "largest", "top", "across", "more", "less", "fall", "drop", "decreasing", "dropped"]
     )
@@ -110,9 +148,9 @@ def interpret(question, start, end):
             known.update(re.findall(r"[a-z]+", item.lower()))
     if words - known:
         raise ValueError(
-            "Offline mode could not resolve: "
+            "Could not resolve: "
             + ", ".join(sorted(words - known))
-            + ". Choose a listed cohort, a preset question or model-assisted mode."
+            + ". Choose a listed cohort, a preset question or the date controls."
         )
     if re.search(r"\bto(p|tal) \d+|\bbottom \d+", q):
         raise ValueError("Rank the full breakdown with highest or lowest.")
@@ -149,6 +187,7 @@ def interpret(question, start, end):
             filters.append((key, found))
     dim = "all"
     for key, pattern in [
+        ("month", "monthly"),
         ("day", "daily|each day|by day|trend|over time"),
         ("reason", "reason|drivers.*fail"),
         ("category", "categor|merchant segment"),
@@ -174,14 +213,14 @@ def interpret(question, start, end):
         metric = "failures"
     elif re.search("successful|successes", q):
         metric = "successes"
-    elif re.search("volume|attempts|transaction count|how many transactions", q):
+    elif re.search("volume|attempts|transaction count|(?:how many|total|count of) (?:transactions|payments)", q):
         metric = "attempts"
     else:
         raise ValueError(
             "Which metric do you mean? Try success rate, eligible volume, failed attempts or successful payment value."
         )
     investigate = metric == "success_rate" and bool(
-        re.search("why|driver|explain|investigate|caused", q)
+        needs_explanation(q)
     )
     comparison = bool(
         re.search(
@@ -189,6 +228,10 @@ def interpret(question, start, end):
             q,
         )
     )
+    if needs_explanation(q) and metric == "failures" and dim == "all" and not comparison:
+        dim = "reason"
+    if needs_explanation(q) and dim != "reason":
+        comparison = True
     if dim == "all" and re.search(r"\bby\b", q):
         raise ValueError(
             "Choose a supported breakdown: bank, method, region, category or day."
@@ -237,12 +280,21 @@ def follow_up(question, previous, planner=None):
         if contribution[1]:
             return follow_up("only " + contribution[1], plan)
         return plan.validate()
+    breakdown = re.fullmatch(r"(?:break (?:it |that )?down by|group by|by) (bank|method|region|category|day|month)", q)
+    if breakdown:
+        return replace(previous, dimension=breakdown[1]).validate()
+    if q in {"why", "why did it change", "why did it drop", "explain that change"}:
+        intent = "investigate" if previous.metric == "success_rate" else "compare"
+        return replace(previous, intent=intent).validate()
     if planner:
         candidate = planner(question, previous.start, previous.end, previous=previous)
         if (candidate.start, candidate.end) != (previous.start, previous.end):
             raise ValueError("Use a new business question to change the comparison dates.")
         return narrow(candidate, previous.filters)
-    raise ValueError("Try ‘Only UPI’ or ‘Which bank contributed most?’, or start a new question.")
+    candidate = interpret(question, previous.start, previous.end)
+    if (candidate.start, candidate.end) != (previous.start, previous.end):
+        raise ValueError("Start a new business question to change dates.")
+    return narrow(candidate, previous.filters)
 
 
 def ambiguous_bank_ranking(question):

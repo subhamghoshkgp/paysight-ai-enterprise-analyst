@@ -43,21 +43,18 @@ Viewed by bank, Northstar contributed **−5.49 pp through its within-bank rate 
 
 ```mermaid
 flowchart TD
-    Q["Business question and sidebar filters"] --> O["Offline interpreter"]
-    Q --> M["Optional Groq or OpenAI planner"]
-    O --> P["Validated metric and cohort plan"]
-    M --> P
-    P --> S["Compile and validate parameterized SQL"]
-    S --> D["Read-only SQLite snapshot"]
-    D --> A["Weighted rates and segment contributions"]
-    A --> V["Charts, evidence and caveats"]
-    A --> E["Optional extractive executive brief"]
-    E --> V
+    Q["Natural-language question"] --> R{"Local intent router"}
+    R -->|Lookup, trend or comparison| S["Compile and execute validated SQL"]
+    R -->|Why or attribution| I["Gather SQL evidence for the investigation"]
+    I --> G["Groq frames verified observations"]
+    I -->|Groq unavailable| V["SQL findings and evidence"]
+    S --> V
+    G --> V
 ```
 
 - **Overview** shows four KPIs, time series, method and bank comparisons, and recorded failure reasons.
 - **AI analyst** supports portfolio metrics, rankings, daily trends and equal-window comparisons. Investigations issue five grouped queries for the portfolio and four overlapping breakdowns.
-- **Data quality** exposes affected transaction IDs, copy counts, missing reasons, pending attempts and dimension-integrity checks.
+- **Overview → Data quality** exposes affected transaction IDs, copy counts, missing reasons, pending attempts and dimension-integrity checks.
 
 SQLite supplies the native read-authorizer and read-only mode in a portable single-file database. Streamlit handles the interface, Plotly draws interactive charts, pandas computes metrics, SQLGlot checks query structure, and pytest exercises the full offline journey.
 
@@ -78,26 +75,22 @@ The sidebar supplies default dates. “Last week” means the trailing seven dat
 
 ### Guided investigations and Groq
 
-Choose **AI analyst** and run the default weekly-decline question. Enter **Only UPI** as a follow-up, then **Which bank contributed most?** The drill-down keeps the dates and filters. For a decline it ranks the most negative total contribution (mix plus within) to the selected cohort. A new business question starts a fresh analysis. Each observed finding opens its supporting aggregate rows, SQL and bound parameters. The data-quality page distinguishes missing reasons in the selected cohort from the snapshot-wide check.
+Choose **AI analyst** and run the default weekly-decline question. Enter **Only UPI** as a follow-up, then **Which bank contributed most?** The drill-down keeps the dates and filters. For a decline it ranks the most negative total contribution (mix plus within) to the selected cohort. A new business question starts a fresh analysis. Each observed finding opens its supporting aggregate rows, SQL and bound parameters. Cohort-specific quality warnings appear with results. The full-snapshot quality report lives under Overview.
 
-To enable **Groq · assisted**, enter the following in the deployed app’s Streamlit settings under **Secrets**, or in a local, git-ignored `.streamlit/secrets.toml`:
+To enable automatic Groq explanations, enter the following in the deployed app’s Streamlit settings under **Secrets**, or in a local, git-ignored `.streamlit/secrets.toml`:
 
 ```toml
 GROQ_API_KEY = "<your Groq key>"
 GROQ_MODEL = "openai/gpt-oss-20b"
 ```
 
-Server environment variables with the same names also work. Select **Groq · assisted** in the sidebar. Groq receives the question, analytical catalog, allowed filter labels and dates. A model-assisted follow-up also receives the prior plan. A second request can order verified observations for the brief. SQL compilation, execution, numeric calculations and evidence assembly run locally. The bundled follow-up shortcuts resolve locally even in assisted mode. If planning fails, select **Offline · deterministic** and rerun. If only the brief fails, the app displays the verified findings.
+Server environment variables with the same names also work. The app routes lookups, comparisons and trends directly to SQL using the local metric catalog. For a supported explanatory question it retrieves evidence first, then makes one Groq request to select and sequence verified observations for the executive brief. The SQL evidence and a descriptive fallback remain available if Groq is unconfigured or unavailable. Unsupported or ambiguous questions prompt clarification. Follow-ups retain the parent scope. Each result displays the route used.
 
-### Optional OpenAI mode
-
-Set `OPENAI_API_KEY` in the server process environment, optionally set `OPENAI_MODEL` to a model supporting Chat Completions with JSON output, restart the app, then choose **OpenAI · assisted**. The default model is `gpt-4o-mini`. In PowerShell, use `$env:OPENAI_API_KEY = Read-Host -MaskInput` on PowerShell 7.1+. In Bash use `read -rs OPENAI_API_KEY && export OPENAI_API_KEY`. The example environment file documents variable names. The application reads the process environment directly.
-
-The model receives the question, allowed metrics, cohort labels and dates. It generates a structured plan that drives SQL compilation. A second request receives verified observation sentences and composes an extractive brief by selecting and ordering them. Model output cannot inject new figures into that brief. Invalid plans or service errors are surfaced, and a failed brief preserves the executed observations. No model credentials are needed for the deterministic path. Live model calls require network access and a valid key. Automated model-contract tests use controlled responses.
+Try **Show monthly transaction volume over the full history** to see the entire dataset, or **What was our payment success rate in March 2026?** for one complete calendar month. The first and last calendar months in the full-history chart are partial. The date picker defaults to the final week for the decline demonstration.
 
 ## Data and definitions
 
-The fixed seed is 412. The 42-day snapshot spans **5 Oct–15 Nov 2026**. All merchants, banks and attempts are synthetic. The generator ships with the repository. The database contains:
+The 365-day snapshot spans **16 Nov 2025–15 Nov 2026**. The original six-week demo uses seed 412. Earlier history uses a separate seed, 413. All merchants, banks and attempts are synthetic. The generator ships with the repository. The database contains:
 
 | Dataset | Grain and use |
 |---|---|
@@ -107,7 +100,7 @@ The fixed seed is 412. The 42-day snapshot spans **5 Oct–15 Nov 2026**. All me
 | attempts | One record per transaction ID, retaining the first ingested row. |
 | eligible | Joined analytical view restricted to successful and failed attempts. |
 
-Across the snapshot 42,114 raw rows yield 42,090 unique attempts. The 624 pending attempts are excluded. Fifteen failures lack a reason and appear under **Unknown**. The quality page shows the selected cohort’s missing-reason count alongside the full-snapshot checks.
+Across the snapshot 364,290 raw rows yield 364,266 unique attempts. The 5,498 pending attempts are excluded. Fifteen failures lack a reason and appear under **Unknown**. The Overview shows the selected cohort’s missing-reason count alongside the full-snapshot checks.
 
 | Metric | Definition |
 |---|---|
@@ -133,7 +126,7 @@ This is a single-user analytical prototype. The app has no production identity s
 
 | Path | Responsibility |
 |---|---|
-| app.py | Overview, analyst, quality workspace and evidence panels |
+| app.py | Overview, analyst, quality report and evidence panels |
 | paysight/data.py | Deterministic data generation, relational schema and quality checks |
 | paysight/plans.py, model.py | Metric catalog, language interpretation and optional model integration |
 | paysight/query.py, analyst.py | Query construction, validation, bounded execution and attribution |

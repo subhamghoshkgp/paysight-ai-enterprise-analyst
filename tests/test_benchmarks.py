@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 
 from paysight.analyst import analyze, decompose
-from paysight.data import END, build, quality
+from paysight.data import END, START, build, quality
 from paysight.plans import QUESTIONS, Plan, interpret
 
 
@@ -112,6 +112,7 @@ def test_quality_and_reproducibility(snapshot, tmp_path):
     assert len(q["Missing failure reasons"]) == 15 and not q["Orphan references"]
     assert all(copies == 2 for _, copies in q["Duplicates"])
     with sqlite3.connect(snapshot) as db:
+        assert db.execute("SELECT MIN(day), MAX(day), COUNT(DISTINCT day) FROM attempts").fetchone() == (str(START), str(END), 365)
         assert (
             db.execute("SELECT count(*) FROM eligible").fetchone()[0]
             == q["Unique attempts"] - q["Pending"]
