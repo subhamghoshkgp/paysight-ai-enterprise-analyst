@@ -67,7 +67,7 @@ except (OSError, sqlite3.Error):
 
 with st.sidebar:
     st.header("PaySight AI", anchor=False)
-    page = st.radio("Workspace", ["Overview", "AI analyst"])
+    page = st.radio("Workspace", ["AI analyst", "Overview"])
     st.divider()
     selected = st.date_input(
         "Analysis window",

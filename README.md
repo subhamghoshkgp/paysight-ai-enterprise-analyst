@@ -26,7 +26,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m streamlit run app.py
 ```
 
-Open the local address printed by Streamlit. Start in **Overview**, then open **AI analyst** and run **“Why did our payment success rate decline last week?”** The default dates reproduce the analysis below. Run the tests from the project root using the same environment's Python and `-m pytest -q`. To build the database separately, run `python -m paysight.data` with that interpreter.
+Open the local address printed by Streamlit. The app opens in **AI analyst**. Run **“Why did our payment success rate decline last week?”** The default dates reproduce the analysis below. Run the tests from the project root using the same environment's Python and `-m pytest -q`. To build the database separately, run `python -m paysight.data` with that interpreter.
 
 ## Example investigation: weekly decline in payment success
 

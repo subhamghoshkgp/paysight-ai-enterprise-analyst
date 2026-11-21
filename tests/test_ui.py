@@ -9,8 +9,12 @@ APP = Path(__file__).resolve().parents[1] / "app.py"
 def test_evaluator_journey():
     app = AppTest.from_file(str(APP), default_timeout=15).run()
     assert not app.exception and not app.error
+    assert app.radio[0].options == ["AI analyst", "Overview"]
+    assert app.radio[0].value == "AI analyst"
+    assert app.text_input(key="question").label == "Business question"
+    assert not app.code
+    app.radio[0].set_value("Overview").run()
     assert len(app.get("plotly_chart")) == 5
-    assert app.radio[0].options == ["Overview", "AI analyst"]
     assert any(e.label.startswith("Data quality") for e in app.expander)
     assert any("24 duplicated" in w.value for w in app.warning)
     app.radio[0].set_value("AI analyst").run()
@@ -23,7 +27,6 @@ def test_evaluator_journey():
 
 def test_invalid_question_clears_prior_result():
     app = AppTest.from_file(str(APP), default_timeout=15).run()
-    app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
     app.text_input[0].set_value("What was the success rate for ImaginaryBank?").run()
     app.button[0].click().run()
@@ -31,7 +34,6 @@ def test_invalid_question_clears_prior_result():
 
 def test_scoped_conversation():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
-    app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
     app.text_input[1].set_value("Within UPI, which bank contributed most?")
     app.button[1].click().run()
@@ -48,7 +50,6 @@ def test_scoped_conversation():
 
 def test_clarifies_bank_ranking():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
-    app.radio[0].set_value("AI analyst").run()
     app.text_input[0].set_value("Which bank performed worst?").run()
     app.button[0].click().run()
     assert app.info and not app.code
@@ -71,7 +72,6 @@ def test_groq_brief_failure_preserves_evidence(monkeypatch):
 
     monkeypatch.setattr("paysight.model.ask", answer)
     app = AppTest.from_file(str(APP), default_timeout=20).run()
-    app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
     assert not app.exception and not app.error
     assert any("rate limit" in warning.value for warning in app.warning)
@@ -80,7 +80,6 @@ def test_groq_brief_failure_preserves_evidence(monkeypatch):
 
 def test_prior_release_answer_is_discarded():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
-    app.radio[0].set_value("AI analyst").run()
     app.session_state["answer"] = {"context": ("old schema",), "result": {"facts": []}}
     app.run()
     assert not app.error and not app.exception and not app.code
@@ -99,7 +98,6 @@ def test_automatic_routing_with_a_configured_key(monkeypatch):
 
     monkeypatch.setattr("paysight.model.ask", summarize)
     app = AppTest.from_file(str(APP), default_timeout=30).run()
-    app.radio[0].set_value("AI analyst").run()
     prompt = app.text_input[0]
     prompt.set_value("Show monthly transaction volume over the full history.").run()
     app.button[0].click().run()
