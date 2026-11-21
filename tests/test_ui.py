@@ -78,3 +78,14 @@ def test_groq_brief_failure_preserves_evidence(monkeypatch):
     assert not app.exception and not app.error
     assert any("rate limit" in warning.value for warning in app.warning)
     assert app.code and "86.59%" in app.session_state.answer["result"]["facts"][0]
+
+
+def test_prior_release_answer_is_discarded():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.radio[0].set_value("AI analyst").run()
+    app.session_state["answer"] = {"context": ("old schema",), "result": {"facts": []}}
+    app.run()
+    assert not app.error and not app.exception and not app.code
+    app.button[0].click().run()
+    assert not app.error and not app.exception
+    assert app.session_state.answer["result"]["sources"]

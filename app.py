@@ -36,9 +36,18 @@ def snapshot():
     return path, quality(path)
 
 
+# Streamlit hashes this wrapper independently of the imported analysis implementation.
+# Bump this version when the cached result format or its calculations change.
+ANALYSIS_VERSION = 2
+
+
 @st.cache_data(max_entries=128)
-def run(plan):
+def cached_analysis(plan, version):
     return analyze(snapshot()[0], plan)
+
+
+def run(plan):
+    return cached_analysis(plan, ANALYSIS_VERSION)
 
 
 try:
@@ -301,7 +310,7 @@ try:
                 index=None, key="ranking_basis",
             )
         submit = st.button("Run analysis", type="primary")
-        context = (question, selected, filters, mode, ranking)
+        context = (ANALYSIS_VERSION, question, selected, filters, mode, ranking)
         provider = mode.split(" · ")[0]
         planner = None if provider == "Offline" else partial(model_plan, provider=provider)
         answer = st.session_state.get("answer")
