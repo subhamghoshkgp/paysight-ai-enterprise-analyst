@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from paysight.analyst import analyze, fmt
+from paysight.analyst import analyze, contribution, fmt
 from paysight.data import BANKS, END, METHODS, START, build, quality
 from paysight.model import executive_brief, resolve_request
 from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, narrow
@@ -28,6 +28,12 @@ h1,h2,h3 {letter-spacing:-.035em}
 .st-key-answer_summary {background:#edf6f3;border-left:4px solid #13796a;
     padding:1rem 1.25rem;border-radius:8px}
 [data-testid="stSidebar"] a {color:#b4e6df}
+@media(max-width:1200px) {
+    .st-key-overview_kpis [data-testid="stHorizontalBlock"] {
+        display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+    .st-key-overview_kpis [data-testid="stColumn"] {width:100%;min-width:0}
+}
+[data-testid="stMetricValue"] > div {white-space:normal;overflow-wrap:anywhere}
 @media(max-width:700px) {
     [data-testid="stMainBlockContainer"] {padding-top:2rem}
     .st-key-answer_summary {padding:.75rem 1rem}
@@ -45,7 +51,7 @@ def snapshot(start=START, end=END):
 
 # Streamlit hashes this wrapper independently of the imported analysis implementation.
 # Bump this version when the cached result format or its calculations change.
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 
 
 @st.cache_data(max_entries=128)
@@ -70,7 +76,7 @@ with st.sidebar:
     page = st.radio("Workspace", ["AI analyst", "Overview"])
     st.divider()
     selected = st.date_input(
-        "Analysis window",
+        "Default analysis window",
         (END - timedelta(days=6), END),
         min_value=START,
         max_value=END,
@@ -81,7 +87,7 @@ with st.sidebar:
         for label, _, definition in METRICS.values():
             st.caption(f"{label} · {definition}")
     st.caption(f"Synthetic data · {START:%d %b %Y} – {END:%d %b %Y}")
-    st.markdown("[Dataset and definitions](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/tree/main/data)")
+    st.link_button("Dataset and definitions", "https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/tree/main/data")
 if len(selected) != 2:
     st.info("Choose both the start and end dates.")
     st.stop()
@@ -117,7 +123,7 @@ def claim_evidence(r):
         st.dataframe(rows, hide_index=True)
         if dim in r["lenses"] and period is None:
             st.caption("Derived from the rows above. Mix holds prior segment rates fixed. Within uses current segment shares.")
-            st.dataframe(r["lenses"][dim].style.format(precision=2), width="stretch")
+            st.dataframe(r["lenses"][dim].style.format({c: contribution for c in r["lenses"][dim] if c.endswith("(pp)")}, precision=2, na_rep="—"), width="stretch")
         st.code(trace["sql"], language="sql")
         st.write("Bound parameters", trace["parameters"])
 
@@ -169,8 +175,21 @@ def chart(df, x, y, title, unit, line=False, color=None):
         showlegend=bool(color),
         legend=dict(orientation="h", yanchor="top", y=-0.2, x=0),
     )
+    if line and df[x].nunique() == 1:
+        label = str(df[x].iloc[0])
+        fig.update_xaxes(type="category", tickmode="array", tickvals=[label], ticktext=[label])
     fig.update_yaxes(rangemode="tozero", gridcolor="#e9edf2")
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
+
+
+def show_advice(hypothesis, action):
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Hypothesis")
+        st.write(hypothesis)
+    with right:
+        st.subheader("Recommended action")
+        st.write(action)
 
 
 def cohort_quality(r):
@@ -200,7 +219,8 @@ try:
         p = scoped(Plan("success_rate", "day", "summary", start, end))
         r = run(p)
         row = r["totals"].iloc[0]
-        cols = st.columns(4)
+        with st.container(key="overview_kpis"):
+            cols = st.columns(4)
         for col, k in zip(cols, ["attempts", "success_rate", "failures", "gtv"]):
             col.metric(
                 METRICS[k][0],
@@ -313,7 +333,16 @@ try:
             st.session_state.pop("answer", None)
             answer = None
 
-        def save_result(plan, prompt, explain, interpreted):
+        def run_question(prompt, previous=None):
+            request_key = (context, prompt, previous)
+            cached = st.session_state.get("last_successful_request")
+            if cached and cached[0] == request_key:
+                st.session_state.answer = cached[1]
+                return
+            first, last = (previous.start, previous.end) if previous else (start, end)
+            plan, explain, interpreted = resolve_request(
+                prompt, first, last, filters, previous=previous, ranking=None if previous else ranking
+            )
             result = run(scoped(plan))
             brief, warning = "", ""
             label = "Direct SQL"
@@ -332,6 +361,8 @@ try:
                 context=context, result=result, brief=brief, warning=warning,
                 prompt=prompt, planner=label, explain=explain,
             )
+            if not warning:
+                st.session_state.last_successful_request = (request_key, st.session_state.answer)
 
         if submit:
             st.session_state.pop("answer", None)
@@ -339,8 +370,7 @@ try:
                 st.info("Choose the ranking measure above, then run the analysis.")
                 st.stop()
             with st.spinner("Analyzing payments…"):
-                plan, explain, interpreted = resolve_request(question, start, end, filters, ranking=ranking)
-                save_result(plan, question, explain, interpreted)
+                run_question(question)
         answer = st.session_state.get("answer")
         if answer:
             results_panel = st.container()
@@ -350,22 +380,34 @@ try:
             if drill:
                 try:
                     previous = answer["result"]["plan"]
-                    next_plan, explain, interpreted = resolve_request(
-                        follow, previous.start, previous.end, filters, previous=previous
-                    )
-                    save_result(next_plan, follow, explain, interpreted)
+                    run_question(follow, previous)
                     answer = st.session_state.answer
                 except ValueError as exc:
                     st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")
             with results_panel:
                 r, brief = answer["result"], answer["brief"]
                 p = r["plan"]
-                summary = brief or r["facts"][0]
+                summary = r["headline"]
+                if brief:
+                    extra = brief.replace(summary, "").strip()
+                    if extra:
+                        summary += " " + extra
+                elif r["driver_facts"]:
+                    summary += " " + " ".join(r["driver_facts"])
                 with st.container(key="answer_summary"):
                     st.subheader("Executive summary", anchor=False)
                     if answer["prompt"] != question:
                         st.caption(answer["prompt"])
                     st.write(summary)
+                    if r["sample_warning"]:
+                        st.warning(r["sample_warning"])
+                    if p.metric.endswith("_rate"):
+                        numerator = "successes" if p.metric == "success_rate" else "failures"
+                        counts = [f"{row.period}: {getattr(row, numerator):,}/{row.attempts:,}" for row in r["totals"].itertuples()]
+                        st.caption(f"{numerator.title()} / eligible attempts · " + " · ".join(counts))
+                    if (p.start, p.end) != (start, end):
+                        st.caption(f"The question uses {p.start:%d %b} – {p.end:%d %b %Y}. "
+                                   f"Sidebar default: {start:%d %b} – {end:%d %b %Y}.")
                     st.caption(f"{p.start:%d %b %Y} – {p.end:%d %b %Y} · {scope_label(p)}")
                     if p.intent != "summary":
                         earlier_end = p.start - timedelta(days=1)
@@ -397,25 +439,24 @@ try:
                     st.caption(
                         "Each breakdown explains the same change. Contributions across tabs overlap."
                     )
-                    for tab, (dim, table) in zip(
-                        st.tabs(["Payment method", "Bank", "Merchant category", "Region"]),
-                        r["lenses"].items(),
-                    ):
+                    titles = {"method": "Payment method", "bank": "Bank", "category": "Merchant category", "region": "Region"}
+                    dims = sorted(r["lenses"], key=lambda dim: dim != p.dimension)
+                    for tab, dim in zip(st.tabs([titles[dim] for dim in dims]), dims):
+                        table = r["lenses"][dim]
                         with tab:
                             effects = table[["Mix (pp)", "Within (pp)"]].sum()
                             st.write(
-                                f"Mix {effects.iloc[0]:+.2f} pp  ·  Within segments {effects.iloc[1]:+.2f} pp"
+                                f"Mix {contribution(effects.iloc[0])} pp  ·  Within segments {contribution(effects.iloc[1])} pp"
                             )
                             display = table[["Previous rate (%)", "Current rate (%)", "Mix (pp)", "Within (pp)", "Total (pp)"]]
-                            st.dataframe(display.rename_axis(dim.title()).style.format(precision=2, na_rep="—"), width="stretch")
-                if answer["explain"]:
-                    a, b = st.columns(2)
-                    with a:
-                        st.subheader("Hypothesis")
-                        st.write(r["hypothesis"])
-                    with b:
-                        st.subheader("Recommended action")
-                        st.write(r["action"])
+                            st.dataframe(display.rename_axis(dim.title()).style.format({c: contribution for c in display if c.endswith("(pp)")}, precision=2, na_rep="—"), width="stretch")
+                            if answer["explain"]:
+                                hypothesis, action, warning = r["lens_notes"][dim]
+                                if warning and warning != r["sample_warning"]:
+                                    st.warning(warning)
+                                show_advice(hypothesis, action)
+                elif answer["explain"]:
+                    show_advice(r["hypothesis"], r["action"])
                 caveats(r)
                 claim_evidence(r)
                 evidence(r, answer["planner"])

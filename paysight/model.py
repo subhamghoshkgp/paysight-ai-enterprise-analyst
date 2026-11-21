@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .data import END, START
-from .plans import (DIMS, METRICS, QUESTIONS, VALUES, Plan, guided_follow_up,
+from .plans import (DIMS, METRICS, QUESTIONS, VALUES, Plan, explicit_dates, guided_follow_up,
                     interpret, narrow, needs_explanation)
 
 
@@ -95,7 +95,7 @@ Otherwise return metric, dimension, intent (summary/compare/investigate), start,
 (boolean). Set explain for requests for reasons or attribution, including implied questions about drivers.
 Investigate is for success-rate attribution; use compare or summary for other supported metrics.
 The previous comparison is the immediately preceding equal-length period. Use selected dates unless
-the question specifies a period. Last week = seven days ending at selected end. Never silently adjust
+the question specifies a period. Last week = seven days ending at selected end. Yesterday = the single day before selected end. Never silently adjust
 invalid dates or clip to the snapshot. Full history means snapshot bounds. GTV and ATV cover successful
 payments. Use prior_plan to resolve references in a follow-up. Preserve prior dates and filters; when
 asked to change them, represent the request faithfully so the application can detect conflicts.
@@ -150,6 +150,7 @@ def resolve_request(question, start, end, filters, previous=None, ranking=None):
     q = question.strip()
     if not q or len(q) > 700:
         raise ValueError("Enter a payment question of up to 700 characters.")
+    explicit_dates(q)
     if previous:
         plan = guided_follow_up(q, previous)
         if plan is not None:

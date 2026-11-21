@@ -10,6 +10,9 @@ from sqlglot import exp, parse
 from .data import connect
 
 
+MAX_GROUPS = 500
+
+
 def compile_query(plan, dimension):
     plan.validate()
     from .plans import DIMS
@@ -44,7 +47,7 @@ FROM eligible
 WHERE {" AND ".join(where)}
 GROUP BY 1, 2
 ORDER BY 1, 2
-LIMIT 500"""
+LIMIT {MAX_GROUPS + 1}"""
     return sql, params
 
 
@@ -69,7 +72,7 @@ def validate(sql):
     if (
         tree.args.get("group") is None
         or tree.args.get("limit") is None
-        or tree.args["limit"].expression.sql() != "500"
+        or tree.args["limit"].expression.sql() != str(MAX_GROUPS + 1)
     ):
         raise ValueError("Bounded grouped results required.")
     allowed = {
@@ -115,6 +118,8 @@ def execute(path, plan, dimension):
         deadline = time.monotonic() + 3
         db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
         frame = pd.read_sql_query(sql, db, params=params)
+    if len(frame) > MAX_GROUPS:
+        raise ValueError(f"This breakdown exceeds {MAX_GROUPS} groups. Narrow the dates or filters.")
     frame["failures"] = frame.attempts - frame.successes
     frame["success_rate"] = 100 * frame.successes / frame.attempts
     frame["failure_rate"] = 100 * frame.failures / frame.attempts

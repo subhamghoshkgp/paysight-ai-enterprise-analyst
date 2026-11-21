@@ -39,7 +39,7 @@ Open the local address printed by Streamlit. The app opens in **AI analyst**. Ru
 
 The aggregate change was **−7.63 percentage points**. UPI rose from 1,581 of 6,744 attempts to 3,859 of 6,980. Holding prior method rates fixed, the new distribution accounts for **−3.23 pp**. Changes within methods account for **−4.39 pp**. Displayed components round independently. The exact values reconcile in the test suite.
 
-Viewed by bank, Northstar contributed **−5.49 pp through its within-bank rate change**, weighted by its current share of attempts. This is a second explanation of the same portfolio movement. Adding it to the method contributions would double-count changes. A processor issue is a hypothesis. Comparing Northstar’s authorization and timeout logs across the two windows would help test it.
+Viewed by bank, Northstar contributed **−5.49 pp through its within-bank rate change**, weighted by its current share of attempts. This is a second explanation of the same portfolio movement. Adding it to the method contributions would double-count changes. Each tab gives a hypothesis and a next step for that breakdown. Cohorts below 30 eligible attempts in either comparison period get a visible caution.
 
 ## Analyst workflow
 
@@ -121,7 +121,7 @@ For segment volume share *p*, success rate *r* in percentage points, and portfol
 
 ### Execution controls and scope
 
-Only validated plans reach the compiler. Identifiers come from application enums and filter values use SQLite bindings. SQLGlot checks for a single bounded aggregate SELECT over the eligible view. The database opens read-only. A SQLite authorizer restricts tables and functions at execution time. Each scan has a three-second execution budget and a 500-group output cap, above the possible grouped output of the supplied snapshot. Streamlit caches up to 128 analyses. The inspectable result contains the parameterized SQL and the ordered parameter values.
+Only validated plans reach the compiler. Identifiers come from application enums and filter values use SQLite bindings. SQLGlot checks for a single bounded aggregate SELECT over the eligible view. The database opens read-only. A SQLite authorizer restricts tables and functions at execution time. Each scan has a three-second execution budget and a 500-group output cap, with an extra row fetched to detect overflow before publishing any partial analysis. Streamlit caches up to 128 SQL analyses. Repeating the last successful request in the same session reuses its result, including its Groq summary. The inspectable result contains the parameterized SQL and the ordered parameter values.
 
 This is a single-user analytical prototype. The app has no production identity system or row-level permissions. Offline mode supports the listed examples and guided follow-ups. Each analysis has one primary metric. Use the examples and filters for predictable scope. Explanations are descriptive. Payment retries, settlement reconciliation, routing decisions, processor logs and external confirmation of incidents are outside the dataset. A production extension would add authenticated policies, versioned source reconciliation and integration with processor incident logs.
 

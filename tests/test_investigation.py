@@ -95,3 +95,42 @@ def test_calendar_lookup_and_explanation_routes():
     assert needs_explanation(why)
     assert interpret(why, END, END).intent == "investigate"
     assert interpret("Why did failures increase?", END, END).intent == "compare"
+
+
+def test_direction_and_small_sample(snapshot):
+    from datetime import date
+    from paysight.plans import Plan
+
+    first = date(2026, 11, 14)
+    plan = Plan("success_rate", "all", "investigate", first, first,
+                (("method", ("UPI",)), ("bank", ("Northstar",))))
+    result = analyze(snapshot, plan)
+    assert "rose from 64.39% to 70.00%" in result["headline"]
+    assert "no decline" in result["headline"]
+    day = date(2026, 11, 15)
+    wallet = replace(plan, start=day, end=day, filters=(("method", ("Wallet",)), ("bank", ("Northstar",))))
+    result = analyze(snapshot, wallet)
+    assert "-13.24 pp" in result["headline"]
+    assert "16 eligible attempts" in result["sample_warning"] and "6.25" in result["sample_warning"]
+    assert all("Widen" in action for _, action, _ in result["lens_notes"].values())
+
+
+def test_lens_advice_and_display_precision(snapshot):
+    from paysight.analyst import contribution
+
+    r = analyze(snapshot, interpret(QUESTIONS[0], END, END))
+    assert "UPI" in r["lens_notes"]["method"][1]
+    assert "Northstar" in r["lens_notes"]["bank"][1]
+    assert all("smallest" not in fact for fact in r["facts"])
+    assert contribution(-0.0001) == "0.00" and contribution(-0.012) == "-0.01"
+    assert all(r["lens_notes"][dim][1] for dim in ("category", "region"))
+
+
+def test_group_cap_detects_overflow(snapshot, monkeypatch):
+    from paysight.query import execute
+
+    monkeypatch.setattr("paysight.query.MAX_GROUPS", 1)
+    plan = interpret(QUESTIONS[1], END, END)
+    assert len(execute(snapshot, plan, "all")[0]) == 1
+    with pytest.raises(ValueError, match="exceeds 1"):
+        execute(snapshot, plan, "method")

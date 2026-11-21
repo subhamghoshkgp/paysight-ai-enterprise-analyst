@@ -154,3 +154,39 @@ def test_contextual_questions_and_followups(monkeypatch):
         app.button[0].click().run()
         assert not app.code and not app.exception and "answer" not in app.session_state
         assert any(expected in e.value for e in app.error)
+
+
+def test_single_day_overview_and_question_window():
+    from datetime import date
+    import json
+
+    day = date(2026, 11, 12)
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.date_input[0].set_value((day, day)).run()
+    app.radio[0].set_value("Overview").run()
+    for chart in app.get("plotly_chart")[:2]:
+        axis = json.loads(chart.proto.spec)["layout"]["xaxis"]
+        assert axis["ticktext"] == ["2026-11-12"] and axis["type"] == "category"
+    app.radio[0].set_value("AI analyst").run()
+    app.button[0].click().run()
+    assert not app.exception and not app.error
+    assert any("Sidebar default" in c.value and "06 Nov" in c.value for c in app.caption)
+
+
+def test_retry_preserves_driver_and_reuses_success(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-fixture")
+    calls = []
+
+    def brief(*args):
+        calls.append(True)
+        if len(calls) == 1:
+            raise ValueError("Groq reached its rate limit.")
+        return {"order": [1]}
+
+    monkeypatch.setattr("paysight.model.ask", brief)
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.button[0].click().run()
+    assert any("fell from" in x.value and "Northstar" in x.value for x in app.markdown)
+    app.button[0].click().run()
+    app.button[0].click().run()
+    assert len(calls) == 2 and not app.exception and app.session_state.answer["brief"]

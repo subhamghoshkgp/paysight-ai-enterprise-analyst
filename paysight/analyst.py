@@ -4,6 +4,49 @@ from .plans import METRICS
 from .query import execute
 
 LENSES = ("method", "bank", "category", "region")
+SMALL_SAMPLE = 30
+
+
+def contribution(value):
+    """Retain full precision for calculations and suppress signed zero for display."""
+    return "0.00" if round(float(value), 2) == 0 else f"{value:+.2f}"
+
+
+def describe_driver(table, dimension, change):
+    effects = table["Total (pp)"]
+    segment = effects.idxmin() if change < 0 else effects.idxmax()
+    effect = effects.loc[segment]
+    direction = "downward" if effect < 0 else "upward"
+    return segment, (f"By {dimension}, {segment} had the largest {direction} contribution "
+                     f"({contribution(effect)} pp, including mix and within-segment change).")
+
+
+
+SMALL_SAMPLE_ADVICE = (
+    "Ordinary variation in a small number of outcomes could explain this result.",
+    "Widen the date range and check whether the pattern persists before investigating an incident.",
+)
+
+
+def interpret_lens(table, dimension, change, warning):
+    if warning:
+        return *SMALL_SAMPLE_ADVICE, warning
+    if round(float(change), 2) == 0:
+        return ("The aggregate rate was stable at the displayed precision.",
+                "Review the segment contributions for offsetting changes.", "")
+    segment, _ = describe_driver(table, dimension, change)
+    row = table.loc[segment]
+    if min(row["Previous attempts"], row["Current attempts"]) < SMALL_SAMPLE:
+        warning = (f"The {segment} comparison has {int(row['Previous attempts'])} previous and "
+                   f"{int(row['Current attempts'])} current attempts. Its contribution is sensitive to individual outcomes.")
+        return *SMALL_SAMPLE_ADVICE, warning
+    if abs(row["Mix (pp)"]) > abs(row["Within (pp)"]):
+        return (f"A shift in the share of attempts going to {segment} may explain part of the movement.",
+                f"Compare {segment}’s share of attempts across the two periods "
+                f"({row['Previous share (%)']:.1f}% to {row['Current share (%)']:.1f}%) and check where volume shifted.", "")
+    return (f"Changes in the outcomes of attempts within {segment} may explain part of the movement.",
+            f"Compare failures and recorded reasons within {segment} across both periods "
+            "before drawing a conclusion about the cause.", "")
 
 
 def decompose(frame):
@@ -86,14 +129,36 @@ def analyze(path, plan):
         )
         sources.append((plan.dimension, "Current", row.segment))
     lenses = {}
+    lens_notes = {}
+    headline = facts[0]
+    driver_facts = []
+    sample_warning = ""
+    sample = totals.loc[totals.attempts.idxmin()]
+    if metric.endswith("_rate") and sample.attempts < SMALL_SAMPLE:
+        count = int(sample.attempts)
+        sample_warning = (f"Small sample in the {sample.period.lower()} period: {count} eligible attempts. "
+                          f"Changing one outcome moves that period’s rate by {100 / count:.2f} percentage points.")
+    elif metric.endswith("_rate") and plan.dimension != "all" and not ranked.empty and ranked.iloc[0].attempts < SMALL_SAMPLE:
+        row = ranked.iloc[0]
+        sample_warning = f"The ranked segment {row.segment} has only {row.attempts:,} current attempts."
+
     if plan.intent != "summary":
         old = totals[totals.period == "Previous"].iloc[0]
         diff = current[metric] - old[metric]
-        change = f"{diff:+.2f} pp" if metric.endswith("_rate") else fmt(metric, diff)
+        change = f"{contribution(diff)} pp" if metric.endswith("_rate") else fmt(metric, diff)
+        if pd.isna(diff):
+            headline = f"{name} could not be compared because one period has no defined value."
+        elif round(float(diff), 2) == 0:
+            headline = f"{name} was unchanged at the displayed precision ({fmt(metric, current[metric])})."
+        else:
+            direction = "rose" if diff > 0 else "fell"
+            headline = f"{name} {direction} from {fmt(metric, old[metric])} to {fmt(metric, current[metric])} ({change})."
+        if plan.intent == "investigate" and round(float(diff), 2) > 0:
+            headline += " There was no decline over these dates."
         sources.insert(0, ("all", None, None))
         facts.insert(
             0,
-            f"{name} moved from {fmt(metric, old[metric])} to {fmt(metric, current[metric])} ({change}).",
+            headline,
         )
     hypothesis = "The observed pattern may reflect customer or routing differences. The snapshot does not identify a causal mechanism."
     action = "Compare the same segment in an adjacent window and check its eligible attempt count."
@@ -101,32 +166,43 @@ def analyze(path, plan):
         for dim in LENSES:
             lenses[dim] = decompose(read(dim))
         bymethod = lenses["method"]
-        facts.append(
-            f"Payment-method mix accounted for {bymethod['Mix (pp)'].sum():+.2f} pp. Changes within methods accounted for {bymethod['Within (pp)'].sum():+.2f} pp."
-        )
+        mix = bymethod["Mix (pp)"].sum()
+        within = bymethod["Within (pp)"].sum()
+        method_fact = (f"Payment-method mix accounted for {contribution(mix)} pp. "
+                       f"Changes within methods accounted for {contribution(within)} pp.")
+        facts.append(method_fact)
         sources.append(("method", None, None))
-        bank_effects = lenses["bank"]["Within (pp)"]
-        bank = bank_effects.idxmin() if diff <= 0 else bank_effects.idxmax()
-        shift = lenses["bank"].loc[bank, "Within (pp)"]
-        facts.append(
-            f"In the bank breakdown, {bank} had the {'smallest' if diff <= 0 else 'largest'} within-bank contribution ({shift:+.2f} pp)."
-        )
-        sources.append(("bank", None, None))
-        if plan.dimension in LENSES:
-            effects = lenses[plan.dimension]["Total (pp)"]
-            driver = effects.idxmin() if diff <= 0 else effects.idxmax()
-            facts.insert(0, f"By {plan.dimension}, {driver} had the "
-                         f"{'smallest' if diff <= 0 else 'largest'} total contribution "
-                         f"({effects[driver]:+.2f} pp, mix plus within-segment change) "
-                         "to the selected cohort’s success-rate change.")
-            sources.insert(0, (plan.dimension, None, None))
-        hypothesis = f"Routing or authorization changes at {bank} could explain its observed movement. Processor logs would be needed to test this."
-        action = f"Compare {bank}'s timeout and authorization logs across the two windows, then check whether its method mix also changed."
+        driver_facts.append(method_fact)
+        if round(float(diff), 2) != 0:
+            banks = lenses["bank"]["Within (pp)"]
+            bank = banks.idxmin() if diff < 0 else banks.idxmax()
+            shift = banks.loc[bank]
+            bank_fact = f"In the bank breakdown, {bank}'s within-bank rate change contributed {contribution(shift)} pp."
+            facts.append(bank_fact)
+            sources.append(("bank", None, None))
+            driver_facts.append(bank_fact)
+            if plan.dimension in LENSES:
+                dim = plan.dimension
+                segment, driver = describe_driver(lenses[dim], dim, diff)
+                facts.insert(0, driver)
+                sources.insert(0, (dim, None, None))
+                driver_facts.insert(0, driver)
+        for dim, table in lenses.items():
+            lens_notes[dim] = interpret_lens(table, dim, diff, sample_warning)
+        selected = plan.dimension if plan.dimension in LENSES else "method"
+        hypothesis, action, lens_warning = lens_notes[selected]
+        sample_warning = sample_warning or lens_warning
+    if sample_warning and not lenses:
+        hypothesis, action = SMALL_SAMPLE_ADVICE
     return dict(
         plan=plan,
+        headline=headline,
+        driver_facts=driver_facts,
+        sample_warning=sample_warning,
         totals=totals,
         grouped=grouped,
         lenses=lenses,
+        lens_notes=lens_notes,
         facts=facts,
         sources=sources,
         frames=frames,

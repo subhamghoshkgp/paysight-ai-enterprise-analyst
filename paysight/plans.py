@@ -123,6 +123,25 @@ def resolve_period(q, start, end):
     return q, start, end
 
 
+def explicit_dates(question):
+    dates = []
+    for token in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question):
+        try:
+            value = date.fromisoformat(token)
+        except ValueError as exc:
+            raise ValueError(f"{token} is not a valid calendar date. Use YYYY-MM-DD.") from exc
+        if not START <= value <= END:
+            raise ValueError(f"Choose dates within {START} through {END}.")
+        dates.append(value)
+    if len(dates) > 2:
+        raise ValueError("Specify one day or one inclusive date range.")
+    if len(dates) == 2 and dates[0] > dates[1] and re.search(
+        r"\d{4}-\d{2}-\d{2}\s*(?:to|through|until|and|[–—-])\s*\d{4}-\d{2}-\d{2}", question, re.I
+    ):
+        raise ValueError("The start date comes after the end date. Reverse the dates and try again.")
+    return dates
+
+
 def interpret(question, start, end):
     q = question.lower().strip()
     q, start, end = resolve_period(q, start, end)
@@ -164,11 +183,9 @@ def interpret(question, start, end):
         "failure rate|volume|average|amount", q
     ):
         raise ValueError("Ask about one metric at a time.")
-    dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", q)
+    dates = explicit_dates(q)
     if dates:
-        if len(dates) > 2:
-            raise ValueError("Specify a single day or one inclusive date range.")
-        start, end = date.fromisoformat(dates[0]), date.fromisoformat(dates[-1])
+        start, end = dates[0], dates[-1]
     elif re.search(r"\b(last|past|previous) (\d+) days?", q):
         days = int(re.search(r"\b(?:last|past|previous) (\d+) days?", q)[1])
         start = end - timedelta(days=days - 1)

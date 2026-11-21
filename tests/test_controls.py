@@ -80,3 +80,17 @@ def test_semantic_plan_preserves_scope(monkeypatch):
     response["filters"] = {"method": []}
     with pytest.raises(ValueError, match="interpret"):
         resolve_request("Tell me about Wallet", END, END, ())
+
+
+@pytest.mark.parametrize("question, message", [
+    ("Success rate from 2026-11-10 to 2026-11-01?", "start date comes after"),
+    ("Show 2026-02-30", "not a valid calendar date"),
+    ("Volume on 2024-05-01", "dates within"),
+])
+def test_dates_checked_before_groq(question, message, monkeypatch):
+    from paysight.model import resolve_request
+
+    monkeypatch.setenv("GROQ_API_KEY", "fixture")
+    monkeypatch.setattr("paysight.model.ask", lambda *a: pytest.fail("Dates should be checked locally"))
+    with pytest.raises(ValueError, match=message):
+        resolve_request(question, END, END, ())
