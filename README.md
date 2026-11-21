@@ -2,6 +2,8 @@
 
 **Ask your data. Understand your business.** An interactive analyst for a synthetic payments portfolio. Ask why approvals fell, inspect the denominators, compare cohorts and open the exact SQL that supports the answer.
 
+**Dataset.** The demo uses 364,266 synthetic payment attempts across 48 merchants and four fictional banks, covering 16 November 2025 through 15 November 2026. [Download the three CSVs (ZIP)](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/raw/refs/heads/main/data/paysight-payments-v2.zip) · [Data dictionary, generation method and worked example](data/README.md)
+
 ![Payment success and the two components of its decline](docs/method-attribution.png)
 
 ## Run the demo

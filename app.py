@@ -74,6 +74,7 @@ with st.sidebar:
         for label, _, definition in METRICS.values():
             st.caption(f"{label} · {definition}")
     st.caption(f"Synthetic snapshot · {START:%d %b %Y} – {END:%d %b %Y}")
+    st.markdown("[About and download the dataset](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/tree/main/data)")
 if len(selected) != 2:
     st.info("Choose both the start and end dates.")
     st.stop()
