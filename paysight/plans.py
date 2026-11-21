@@ -59,6 +59,8 @@ class Plan:
             or self.intent not in ("summary", "compare", "investigate")
         ):
             raise ValueError("Unsupported metric, dimension or analysis.")
+        if self.start > self.end:
+            raise ValueError("The start date comes after the end date. Reverse the dates and try again.")
         if not START <= self.start <= self.end <= END:
             raise ValueError(f"Choose dates within {START} through {END}.")
         if self.intent != "summary" and self.previous < START:
@@ -151,11 +153,7 @@ def interpret(question, start, end):
         for item in options:
             known.update(re.findall(r"[a-z]+", item.lower()))
     if words - known:
-        raise ValueError(
-            "Could not resolve: "
-            + ", ".join(sorted(words - known))
-            + ". Choose a listed cohort, a preset question or the date controls."
-        )
+        raise ValueError("I can help with payment performance. Try asking about a success rate, volume or payment value.")
     if re.search(r"\bto(p|tal) \d+|\bbottom \d+", q):
         raise ValueError("Rank the full breakdown with highest or lowest.")
     if re.search(r"\bmerchant(s)?\b", q) and not re.search(
@@ -263,8 +261,8 @@ def narrow(plan, filters):
     return replace(plan, filters=tuple(combined.items())).validate()
 
 
-def follow_up(question, previous, planner=None):
-    """Apply common drill-downs exactly. More general follow-ups may use a provider."""
+def guided_follow_up(question, previous):
+    """Resolve fully specified drill-down commands, retaining the previous scope."""
     q = question.strip().lower().rstrip("?.!").strip()
     if not q:
         raise ValueError("Enter a follow-up question.")
@@ -283,7 +281,7 @@ def follow_up(question, previous, planner=None):
             raise ValueError("Start with a comparison of success rates across two periods.")
         plan = replace(previous, dimension=contribution[2], intent="investigate")
         if contribution[1]:
-            return follow_up("only " + contribution[1], plan)
+            return guided_follow_up("only " + contribution[1], plan)
         return plan.validate()
     breakdown = re.fullmatch(r"(?:break (?:it |that )?down by|group by|by) (bank|method|region|category|day|month)", q)
     if breakdown:
@@ -291,6 +289,13 @@ def follow_up(question, previous, planner=None):
     if q in {"why", "why did it change", "why did it drop", "explain that change"}:
         intent = "investigate" if previous.metric == "success_rate" else "compare"
         return replace(previous, intent=intent).validate()
+    return None
+
+
+def follow_up(question, previous, planner=None):
+    guided = guided_follow_up(question, previous)
+    if guided is not None:
+        return guided
     if planner:
         candidate = planner(question, previous.start, previous.end, previous=previous)
         if (candidate.start, candidate.end) != (previous.start, previous.end):
@@ -303,6 +308,7 @@ def follow_up(question, previous, planner=None):
 
 
 def ambiguous_bank_ranking(question):
-    q = question.lower()
-    return (bool(re.search(r"\bbanks?\b", q) and re.search(r"\bworst\b", q))
-            and not re.search(r"rate|count|volume|value|amount|attempt|failure|success|timeout", q))
+    return bool(re.fullmatch(
+        r"(?:which|what) bank (?:performed (?:the )?worst|(?:is|was) (?:the )?worst)[?!.]*",
+        question.strip().lower(),
+    ))

@@ -44,6 +44,7 @@ def test_model_contract(monkeypatch):
         start=str(END),
         end=str(END),
         ascending=False,
+        explain=False,
         filters={},
     )
     monkeypatch.setattr("paysight.model.ask", lambda *args: plan)
@@ -56,3 +57,26 @@ def test_model_contract(monkeypatch):
     monkeypatch.setattr("paysight.model.ask", lambda *args: {"order": [3]})
     with pytest.raises(ValueError):
         executive_brief("q", ["First."])
+
+
+def test_semantic_plan_preserves_scope(monkeypatch):
+    from paysight.model import resolve_request
+    from paysight.plans import Plan, narrow
+
+    monkeypatch.setenv("GROQ_API_KEY", "fixture")
+    parent = Plan("attempts", "all", "summary", END, END, (("method", ("UPI",)),))
+    response = dict(parent.as_context(), filters={}, explain=False)
+    monkeypatch.setattr("paysight.model.ask", lambda *args: response)
+    result, _, semantic = resolve_request("Can you unpack that number?", END, END, (), parent)
+    assert semantic and result.filters == parent.filters
+    response["filters"] = {"method": ["Wallet"]}
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_request("Tell me more about Wallet", END, END, (), parent)
+    with pytest.raises(ValueError, match="Did you mean Wallet"):
+        resolve_request("Tell me about payments", END, END, ())
+    result, _, _ = resolve_request("Tell me about Wallet", END, END, parent.filters)
+    with pytest.raises(ValueError, match="conflicts"):
+        narrow(result, parent.filters)
+    response["filters"] = {"method": []}
+    with pytest.raises(ValueError, match="interpret"):
+        resolve_request("Tell me about Wallet", END, END, ())

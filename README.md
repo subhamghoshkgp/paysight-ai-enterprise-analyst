@@ -45,12 +45,13 @@ Viewed by bank, Northstar contributed **−5.49 pp through its within-bank rate 
 
 ```mermaid
 flowchart TD
-    Q["Natural-language question"] --> R{"Local intent router"}
-    R -->|Lookup, trend or comparison| S["Compile and execute validated SQL"]
-    R -->|Why or attribution| I["Gather SQL evidence for the investigation"]
-    I --> G["Groq frames verified observations"]
-    I -->|Groq unavailable| V["SQL findings and evidence"]
-    S --> V
+    Q["Question and selected scope"] --> R{"Exact example or guided drill-down?"}
+    R -->|Yes| S["Validate plan and execute SQL"]
+    R -->|No| M["Groq interprets the question in context"]
+    M -->|Out of scope or ambiguous| C["Explain scope or ask for clarification"]
+    M -->|Supported plan| S
+    S -->|Lookup or comparison| V["SQL findings and evidence"]
+    S -->|Explanation requested| G["Groq selects verified findings"]
     G --> V
 ```
 
@@ -86,7 +87,7 @@ GROQ_API_KEY = "<your Groq key>"
 GROQ_MODEL = "openai/gpt-oss-20b"
 ```
 
-Server environment variables with the same names also work. The app routes lookups, comparisons and trends directly to SQL using the local metric catalog. For a supported explanatory question it retrieves evidence first, then makes one Groq request to select and sequence verified observations for the executive brief. The SQL evidence and a descriptive fallback remain available if Groq is unconfigured or unavailable. Unsupported or ambiguous questions prompt clarification. Follow-ups retain the parent scope. Open **Query evidence** to see which analysis method was used.
+The same settings work as server environment variables. Exact examples and guided drill-downs use local plans. For other questions, Groq receives the question, metric and dimension catalog, dates, selected filters and (for a follow-up) the prior plan. It can propose a structured plan, request clarification or identify a question outside the dataset. The application validates the plan and scope before compiling parameterized SQL. SQL supplies every number. Explanatory questions can use a separate Groq call to select verified observations for the executive summary. Query evidence identifies when Groq interpreted the question. If interpretation is unavailable, use an example; if the summary call fails, the SQL evidence is still available.
 
 Try **Show monthly transaction volume over the full history** to see the entire dataset, or **What was our payment success rate in March 2026?** for one complete calendar month. The first and last calendar months in the full-history chart are partial. The date picker defaults to the final week of the snapshot.
 
@@ -122,7 +123,7 @@ For segment volume share *p*, success rate *r* in percentage points, and portfol
 
 Only validated plans reach the compiler. Identifiers come from application enums and filter values use SQLite bindings. SQLGlot checks for a single bounded aggregate SELECT over the eligible view. The database opens read-only. A SQLite authorizer restricts tables and functions at execution time. Each scan has a three-second execution budget and a 500-group output cap, above the possible grouped output of the supplied snapshot. Streamlit caches up to 128 analyses. The inspectable result contains the parameterized SQL and the ordered parameter values.
 
-This is a single-user analytical prototype. The app has no production identity system or row-level permissions. The offline interpreter supports a bounded vocabulary and one primary metric per question. Use the examples and filters for predictable scope. Explanations are descriptive. Payment retries, settlement reconciliation, routing decisions, processor logs and external confirmation of incidents are outside the dataset. A production extension would add authenticated policies, versioned source reconciliation and integration with processor incident logs.
+This is a single-user analytical prototype. The app has no production identity system or row-level permissions. Offline mode supports the listed examples and guided follow-ups. Each analysis has one primary metric. Use the examples and filters for predictable scope. Explanations are descriptive. Payment retries, settlement reconciliation, routing decisions, processor logs and external confirmation of incidents are outside the dataset. A production extension would add authenticated policies, versioned source reconciliation and integration with processor incident logs.
 
 ## Repository map and verification
 

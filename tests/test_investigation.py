@@ -59,7 +59,7 @@ def test_groq_transport_and_verified_brief(monkeypatch):
         assert body["model"] == "test-model" and timeout == 15
         payload = json.loads(body["messages"][1]["content"])
         calls.append(payload)
-        answer = dict(previous.as_context(), dimension="bank") if "question" in payload and "metrics" in payload else {"order": [1]}
+        answer = dict(previous.as_context(), dimension="bank", explain=True) if "question" in payload and "metrics" in payload else {"order": [1]}
         return io.BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(answer)}}]}).encode())
 
     monkeypatch.setattr("paysight.model.urlopen", respond)

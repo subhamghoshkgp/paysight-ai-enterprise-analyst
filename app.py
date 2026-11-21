@@ -9,8 +9,8 @@ import streamlit as st
 
 from paysight.analyst import analyze, fmt
 from paysight.data import BANKS, END, METHODS, START, build, quality
-from paysight.model import executive_brief
-from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, follow_up, interpret, narrow, needs_explanation
+from paysight.model import executive_brief, resolve_request
+from paysight.plans import METRICS, QUESTIONS, Plan, ambiguous_bank_ranking, narrow
 
 st.set_page_config(
     page_title="PaySight AI · Payment intelligence", page_icon="◈", layout="wide"
@@ -45,7 +45,7 @@ def snapshot(start=START, end=END):
 
 # Streamlit hashes this wrapper independently of the imported analysis implementation.
 # Bump this version when the cached result format or its calculations change.
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 
 @st.cache_data(max_entries=128)
@@ -313,7 +313,7 @@ try:
             st.session_state.pop("answer", None)
             answer = None
 
-        def save_result(plan, prompt, explain):
+        def save_result(plan, prompt, explain, interpreted):
             result = run(scoped(plan))
             brief, warning = "", ""
             label = "Direct SQL"
@@ -326,6 +326,8 @@ try:
                     label = "SQL findings · Groq unavailable"
             elif explain:
                 label = "SQL findings · Groq unconfigured"
+            if interpreted:
+                label = "Groq interpreted the question · " + label
             st.session_state.answer = dict(
                 context=context, result=result, brief=brief, warning=warning,
                 prompt=prompt, planner=label, explain=explain,
@@ -336,14 +338,9 @@ try:
             if ambiguous_bank_ranking(question) and not ranking:
                 st.info("Choose the ranking measure above, then run the analysis.")
                 st.stop()
-            prompt = question
-            if ranking:
-                prompt = question.lower().replace("performed", "").replace("performing", "").replace("worst", "")
-                prompt = prompt + (" lowest success rate" if ranking == "Lowest success rate" else " most failed attempts")
             with st.spinner("Analyzing payments…"):
-                explain = needs_explanation(prompt)
-                plan = interpret(prompt, start, end)
-                save_result(plan, question, explain)
+                plan, explain, interpreted = resolve_request(question, start, end, filters, ranking=ranking)
+                save_result(plan, question, explain, interpreted)
         answer = st.session_state.get("answer")
         if answer:
             results_panel = st.container()
@@ -352,9 +349,11 @@ try:
                 drill = st.form_submit_button("Run follow-up")
             if drill:
                 try:
-                    explain = needs_explanation(follow)
-                    next_plan = follow_up(follow, answer["result"]["plan"])
-                    save_result(next_plan, follow, explain)
+                    previous = answer["result"]["plan"]
+                    next_plan, explain, interpreted = resolve_request(
+                        follow, previous.start, previous.end, filters, previous=previous
+                    )
+                    save_result(next_plan, follow, explain, interpreted)
                     answer = st.session_state.answer
                 except ValueError as exc:
                     st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")

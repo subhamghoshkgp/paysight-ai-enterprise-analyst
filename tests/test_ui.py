@@ -105,10 +105,52 @@ def test_automatic_routing_with_a_configured_key(monkeypatch):
     assert not calls and len(result["grouped"]) == 13
     assert result["grouped"].attempts.sum() == 358768
     assert app.session_state.answer["planner"] == "Direct SQL"
-    why = "Why did our payment success rate drop last week?"
+    why = "Why did our payment success rate decline last week?"
     app.text_input[0].set_value(why).run()
     app.button[0].click().run()
     assert calls == [why] and app.session_state.answer["brief"]
     app.text_input[1].set_value("Only UPI")
     app.button[1].click().run()
     assert calls == [why] and app.session_state.answer["planner"] == "Direct SQL"
+
+
+def test_contextual_questions_and_followups(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-fixture")
+    requests = []
+
+    def respond(instructions, payload, provider):
+        assert provider == "Groq"
+        requests.append(payload)
+        if "observations" in payload:
+            return {"order": [0]}
+        question = payload["question"]
+        if "weather" in question:
+            return {"error": "out_of_scope"}
+        if "upii" in question:
+            return {"error": "cohort", "suggestion": "UPI"}
+        first, last = payload["selected"]
+        inherited = payload["prior_plan"]
+        return dict(metric="success_rate", dimension="bank" if inherited else "all",
+                    intent="investigate" if inherited else "summary", start=first, end=last,
+                    filters={"method": ["UPI"]}, ascending=False, explain=bool(inherited))
+
+    monkeypatch.setattr("paysight.model.ask", respond)
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    app.text_input(key="question").set_value("Of the UPI payments we tried, what share went through?").run()
+    app.button[0].click().run()
+    assert app.code and not app.error and len(requests) == 1
+    assert app.session_state.answer["result"]["plan"].filters == (("method", ("UPI",)),)
+    assert "Groq interpreted" in app.session_state.answer["planner"]
+
+    app.text_input[1].set_value("Help me understand what was behind that movement across banks")
+    app.button[1].click().run()
+    assert not app.error and app.session_state.answer["brief"]
+    assert requests[1]["prior_plan"]["filters"] == {"method": ("UPI",)}
+    assert "observations" in requests[2]
+
+    for question, expected in [("How is the weather near the bank?", "payment performance"),
+                               ("sucess rate of upii", "Did you mean UPI")]:
+        app.text_input(key="question").set_value(question).run()
+        app.button[0].click().run()
+        assert not app.code and not app.exception and "answer" not in app.session_state
+        assert any(expected in e.value for e in app.error)
