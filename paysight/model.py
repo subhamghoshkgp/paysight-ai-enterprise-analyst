@@ -94,6 +94,11 @@ Otherwise return metric, dimension, intent (summary/compare/investigate), start,
 (object of catalog dimensions to nonempty arrays of exact values), ascending (boolean), and explain
 (boolean). Set explain for requests for reasons or attribution, including implied questions about drivers.
 Investigate is for success-rate attribution; use compare or summary for other supported metrics.
+Use dimension all for a change within a named cohort unless the question asks to split or rank it.
+Named banks and payment methods constrain filters. A why question about success rate uses investigate;
+its driver breakdowns are computed automatically. Dimension reason is ONLY for counts of failed
+attempts grouped by recorded reason and requires metric failures. A success rate by recorded
+failure reason has no meaningful denominator; return {"error":"unsupported"} for that request.
 The previous comparison is the immediately preceding equal-length period. Use selected dates unless
 the question specifies a period. Last week = seven days ending at selected end. Yesterday = the single day before selected end. Never silently adjust
 invalid dates or clip to the snapshot. Full history means snapshot bounds. GTV and ATV cover successful
@@ -101,10 +106,16 @@ payments. Use prior_plan to resolve references in a follow-up. Preserve prior da
 asked to change them, represent the request faithfully so the application can detect conflicts.
 sidebar_filters constrain the answer. Never discard a requested conflicting filter. Use only the
 catalog and supplied context. Do not invent causal evidence, filters or default metrics."""
-    v = ask(rules, dict(question=question, metrics=METRICS, dimensions=DIMS, filter_values=VALUES,
-                        snapshot=[str(START), str(END)], selected=[str(start), str(end)],
-                        sidebar_filters=dict(filters), prior_plan=previous.as_context() if previous else None),
-            provider)
+    payload = dict(question=question, metrics=METRICS, dimensions=DIMS, filter_values=VALUES,
+                   snapshot=[str(START), str(END)], selected=[str(start), str(end)],
+                   sidebar_filters=dict(filters), prior_plan=previous.as_context() if previous else None)
+    v = ask(rules, payload, provider)
+    if isinstance(v, dict) and "error" not in v and v.get("dimension") == "reason" and v.get("metric") != "failures":
+        feedback = ("The first plan grouped a metric by recorded failure reason. That grouping is valid "
+                    "only for failure counts. Reinterpret the original question. Preserve the requested "
+                    "metric and named cohorts. If the request explicitly needs an unsupported grouping, "
+                    "return the unsupported error.")
+        v = ask(rules, dict(payload, validation_feedback=feedback), provider)
     if isinstance(v, dict) and isinstance(v.get("error"), str):
         suggestion = v.get("suggestion")
         if v["error"] == "cohort" and any(suggestion in options for options in VALUES.values()):

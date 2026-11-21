@@ -94,3 +94,19 @@ def test_dates_checked_before_groq(question, message, monkeypatch):
     monkeypatch.setattr("paysight.model.ask", lambda *a: pytest.fail("Dates should be checked locally"))
     with pytest.raises(ValueError, match=message):
         resolve_request(question, END, END, ())
+
+
+def test_invalid_reason_lens_is_replanned_before_execution(monkeypatch):
+    from paysight.model import semantic_request
+
+    answers = []
+    def respond(rules, payload, provider):
+        answers.append(payload)
+        return dict(metric="success_rate", intent="investigate", dimension="reason" if len(answers)==1 else "all",
+                    start=str(END), end=str(END), ascending=False, explain=True,
+                    filters={"method":["UPI"], "bank":["Northstar"]})
+    monkeypatch.setattr("paysight.model.ask", respond)
+    plan, explain = semantic_request("Why did UPI success rate drop on Northstar?", END, END, "Groq")
+    assert explain and plan.dimension == "all" and len(answers) == 2
+    assert "validation_feedback" in answers[1]
+    assert dict(plan.filters) == {"method": ("UPI",), "bank": ("Northstar",)}
