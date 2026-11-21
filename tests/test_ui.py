@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
 
 
+APP = Path(__file__).resolve().parents[1] / "app.py"
+
+
 def test_evaluator_journey():
-    app = AppTest.from_file("app.py", default_timeout=15).run()
+    app = AppTest.from_file(str(APP), default_timeout=15).run()
     assert not app.exception and not app.error
     assert len(app.metric) == 4 and len(app.get("plotly_chart")) == 5
     app.radio[0].set_value("AI analyst").run()
@@ -16,7 +21,7 @@ def test_evaluator_journey():
 
 
 def test_invalid_question_clears_prior_result():
-    app = AppTest.from_file("app.py", default_timeout=15).run()
+    app = AppTest.from_file(str(APP), default_timeout=15).run()
     app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
     app.text_input[0].set_value("What was the success rate for ImaginaryBank?").run()

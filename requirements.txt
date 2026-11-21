@@ -1,4 +1,5 @@
-streamlit==1.51.0
+streamlit==1.51.0; python_version < "3.14"
+streamlit==1.67.0; python_version >= "3.14"
 plotly==6.4.0
 pandas>=2.2,<3
 sqlglot==27.29.0
