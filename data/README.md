@@ -10,7 +10,7 @@ PaySight uses simulated payment attempts covering **16 November 2025 through 15 
 | `merchants.csv` | 48 | `id`, `name`, `category`, `region`. Region describes the merchant’s location. |
 | `banks.csv` | 4 | `id`, `name`. Bank names are fictional. |
 
-Payments use UPI, Credit Card, Debit Card, Net Banking or Wallet. The file preserves ingestion order, so use the `day` column to sort by date. For example, attempt 1 is a successful Wallet payment of ₹1,034.42 on 5 October 2026. Its `bank_id` of 0 maps to Meridian and its `merchant_id` of 6 maps to Merchant 07.
+Payments use UPI, Credit Card, Debit Card, Net Banking or Wallet. The file preserves ingestion order, so use the `day` column to sort by date.
 
 ## How the app counts attempts
 
