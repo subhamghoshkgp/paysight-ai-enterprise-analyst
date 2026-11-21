@@ -4,20 +4,6 @@ PaySight answers questions about payment performance. It calculates metrics in S
 
 [Open the live app](https://paysight-ai-enterprise-analyst-hu6tqhc5lqxoqe3tm8jyvu.streamlit.app/?embed=true) · [Download the synthetic dataset](data/paysight-payments-v2.zip?raw=true) · [Data dictionary and reproduction instructions](data/README.md)
 
-## Example investigation
-
-**Why did our payment success rate decline last week?** The default window compares the final two weeks of the synthetic dataset.
-
-| Portfolio measure | 2–8 Nov 2026 | 9–15 Nov 2026 |
-|---|---:|---:|
-| Successful attempts | 6,354 | 6,044 |
-| Eligible attempts | 6,744 | 6,980 |
-| Success rate | 94.22% | 86.59% |
-
-The rate fell **7.63 percentage points**. UPI volume rose from 1,581 to 3,859 attempts. The shift in payment-method shares accounted for **−3.23 points**, and changes in success rates within methods accounted for **−4.39 points**. The displayed components round independently.
-
-The bank breakdown offers a separate view of the same decline. Northstar’s within-bank rate change contributed **−5.49 points**. Comparing its recorded failure reasons across the two weeks would help investigate the change. Establishing a processor incident would require external logs.
-
 ## Using the app
 
 - **AI analyst** opens first. Ask a question in your own words, choose an example, or narrow a result with a follow-up such as “Only UPI.” Follow-ups retain the previous dates and filters. Each finding includes its supporting data and SQL.
