@@ -18,7 +18,7 @@ Payments use UPI, Credit Card, Debit Card, Net Banking or Wallet. The file prese
 2. Exclude **5,498 pending attempts** when computing success or failure rates. The denominator across the full year is **358,768 eligible attempts**.
 3. Count each eligible SUCCESS in the numerator. Blank reasons are expected for successful and pending payments. Among failures, **15** have a blank reason. They still count as failures and appear under **Unknown** in the reason breakdown.
 
-After extracting the ZIP, run this from the folder containing the CSVs to reproduce the two demo weeks:
+After extracting the ZIP, run this from the folder containing the CSVs to reproduce the two comparison weeks:
 
 ```python
 import pandas as pd
@@ -40,7 +40,7 @@ for start, end in [("2026-11-02", "2026-11-08"), ("2026-11-09", "2026-11-15")]:
 
 ## How the dataset was created
 
-The final week intentionally has more UPI traffic and a higher simulated failure probability at Northstar. These choices give reviewers a known change in transaction mix and a separate within-segment change to investigate. The original six weeks use seed 412 and the earlier history uses seed 413. The data contains payment attempts and dimensions only. [Generator and SQLite schema](../paysight/data.py)
+The final week intentionally has more UPI traffic and a higher simulated failure probability at Northstar. This produces a change in transaction mix and a separate within-segment change in the same period. The original six weeks use seed 412 and the earlier history uses seed 413. The data contains payment attempts and dimensions only. [Generator and SQLite schema](../paysight/data.py)
 
 Run `python -m paysight.export_data` from the repository root to build the snapshot if needed and export the three source tables. The app derives its deduplicated attempts and eligible analysis view from these tables. [Export code](../paysight/export_data.py)
 

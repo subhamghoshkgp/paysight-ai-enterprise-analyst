@@ -1,14 +1,16 @@
 # PaySight AI — Enterprise Payments Intelligence
 
-**Ask your data. Understand your business.** An interactive analyst for a synthetic payments portfolio. Ask why approvals fell, inspect the denominators, compare cohorts and open the exact SQL that supports the answer.
+PaySight analyzes payment performance using natural-language questions. It reports metrics, compares cohorts and links each finding to the SQL and records that support it.
 
-**Dataset.** The demo uses 364,266 synthetic payment attempts across 48 merchants and four fictional banks, covering 16 November 2025 through 15 November 2026. [Download the three CSVs (ZIP)](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/raw/refs/heads/main/data/paysight-payments-v2.zip) · [Data dictionary, generation method and worked example](data/README.md)
+[Open the live application](https://paysight-ai-enterprise-analyst-hu6tqhc5lqxoqe3tm8jyvu.streamlit.app/?embed=true)
+
+**Dataset.** The application uses 364,266 synthetic payment attempts across 48 merchants and four fictional banks, covering 16 November 2025 through 15 November 2026. [Download the three CSVs (ZIP)](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/raw/refs/heads/main/data/paysight-payments-v2.zip) · [Data dictionary, generation method and worked example](data/README.md)
 
 ![Payment success and the two components of its decline](docs/method-attribution.png)
 
-## Run the demo
+## Run locally
 
-Use Python 3.12. From the extracted project directory, create an environment and start the application. First launch builds the seeded database automatically and requires write access to the project’s data directory.
+Use Python 3.12. From the project root, create an environment and start the application. First launch builds the seeded database automatically and requires write access to the project’s data directory.
 
 **Windows PowerShell**
 
@@ -28,7 +30,7 @@ python3.12 -m venv .venv
 
 Open the local address printed by Streamlit. Start in **Overview**, then open **AI analyst** and run **“Why did our payment success rate decline last week?”** The default dates reproduce the analysis below. Run the tests from the project root using the same environment's Python and `-m pytest -q`. To build the database separately, run `python -m paysight.data` with that interpreter.
 
-## What the flagship investigation found
+## Example investigation: weekly decline in payment success
 
 | Synthetic portfolio | 2–8 Nov 2026 | 9–15 Nov 2026 |
 |---|---:|---:|
@@ -73,7 +75,7 @@ SQLite supplies the native read-authorizer and read-only mode in a portable sing
 | Which merchant categories contribute most to failed transactions? | Failed counts by category |
 | What was the average transaction value for Wallet last week? | Successful Wallet value divided by successful Wallet attempts |
 
-The sidebar supplies default dates. “Last week” means the trailing seven dates ending at the selected end date. The synthetic snapshot ends on a Sunday, so the flagship demo compares two full Monday–Sunday weeks. Relative dates are independent of the computer clock. Explicit ISO dates in a question override the sidebar dates. A period comparison uses an adjacent, equally long preceding window. Sidebar and question cohort filters intersect. Inspect the resolved window and filter bindings in **Query evidence**.
+The sidebar supplies default dates. “Last week” means the trailing seven dates ending at the selected end date. The synthetic snapshot ends on a Sunday, so the default investigation compares two full Monday–Sunday weeks. Relative dates are independent of the computer clock. Explicit ISO dates in a question override the sidebar dates. A period comparison uses an adjacent, equally long preceding window. Sidebar and question cohort filters intersect. Inspect the resolved window and filter bindings in **Query evidence**.
 
 ### Guided investigations and Groq
 
@@ -86,13 +88,13 @@ GROQ_API_KEY = "<your Groq key>"
 GROQ_MODEL = "openai/gpt-oss-20b"
 ```
 
-Server environment variables with the same names also work. The app routes lookups, comparisons and trends directly to SQL using the local metric catalog. For a supported explanatory question it retrieves evidence first, then makes one Groq request to select and sequence verified observations for the executive brief. The SQL evidence and a descriptive fallback remain available if Groq is unconfigured or unavailable. Unsupported or ambiguous questions prompt clarification. Follow-ups retain the parent scope. Each result displays the route used.
+Server environment variables with the same names also work. The app routes lookups, comparisons and trends directly to SQL using the local metric catalog. For a supported explanatory question it retrieves evidence first, then makes one Groq request to select and sequence verified observations for the executive brief. The SQL evidence and a descriptive fallback remain available if Groq is unconfigured or unavailable. Unsupported or ambiguous questions prompt clarification. Follow-ups retain the parent scope. Open **Query evidence** to see which analysis method was used.
 
-Try **Show monthly transaction volume over the full history** to see the entire dataset, or **What was our payment success rate in March 2026?** for one complete calendar month. The first and last calendar months in the full-history chart are partial. The date picker defaults to the final week for the decline demonstration.
+Try **Show monthly transaction volume over the full history** to see the entire dataset, or **What was our payment success rate in March 2026?** for one complete calendar month. The first and last calendar months in the full-history chart are partial. The date picker defaults to the final week of the snapshot.
 
 ## Data and definitions
 
-The 365-day snapshot spans **16 Nov 2025–15 Nov 2026**. The original six-week demo uses seed 412. Earlier history uses a separate seed, 413. All merchants, banks and attempts are synthetic. The generator ships with the repository. The database contains:
+The 365-day snapshot spans **16 Nov 2025–15 Nov 2026**. The final six weeks use seed 412. Earlier history uses a separate seed, 413. All merchants, banks and attempts are synthetic. The generator ships with the repository. The database contains:
 
 | Dataset | Grain and use |
 |---|---|
@@ -133,8 +135,5 @@ This is a single-user analytical prototype. The app has no production identity s
 | paysight/plans.py, model.py | Metric catalog, language interpretation and optional model integration |
 | paysight/query.py, analyst.py | Query construction, validation, bounded execution and attribution |
 | tests/ | Raw-data oracle, SQL controls, quality incidents, model contracts and Streamlit UI tests |
-| docs/DEMO.md | Four-minute speaking script, recording checklist and publishing commands |
 
 The benchmark oracle independently reads the raw rows, retains first copies, resolves dimension IDs, applies dates and filters, and calculates the expected result in Python. Eleven distinct natural-language questions are checked at group level. Separate tests cover absent cohorts, reproducibility, restricted access, malformed requests and interface behavior. The test fixture verifies planted effects independently of the analyst. All runtime observations come from executed queries.
-
-See [the demonstration guide](docs/DEMO.md) for the recording and publication steps.
