@@ -28,6 +28,8 @@ def ask(instructions, payload, provider="OpenAI"):
         headers={
             "Authorization": "Bearer " + key,
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "PaySight-AI/1.0",
         },
         data=json.dumps(
             {
@@ -47,9 +49,17 @@ def ask(instructions, payload, provider="OpenAI"):
     except HTTPError as exc:
         detail = {
             401: "rejected the server API key",
-            403: "denied access to the requested model",
+            403: "declined the API request (HTTP 403)",
             429: "reached its rate limit",
         }.get(exc.code, f"returned HTTP {exc.code}")
+        if provider == "Groq" and exc.code == 403:
+            try:
+                error_code = json.loads(exc.read(8192))["error"]["code"]
+            except (ValueError, TypeError, KeyError, OSError):
+                error_code = None
+            if error_code in ("model_permission_blocked_org", "model_permission_blocked_project"):
+                scope = "organization" if error_code.endswith("_org") else "project"
+                detail = f"reports that its {scope} settings block the configured model"
         raise ValueError(f"{provider} {detail}. Retry or choose offline mode.") from exc
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
         raise ValueError(
