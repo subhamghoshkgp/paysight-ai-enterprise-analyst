@@ -164,8 +164,11 @@ def test_single_day_overview_and_question_window():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.date_input[0].set_value((day, day)).run()
     app.radio[0].set_value("Overview").run()
-    for chart in app.get("plotly_chart")[:2]:
-        axis = json.loads(chart.proto.spec)["layout"]["xaxis"]
+    layouts = [json.loads(chart.proto.spec)["layout"] for chart in app.get("plotly_chart")]
+    daily = [layout for layout in layouts if layout["title"]["text"].startswith("Daily ")]
+    assert len(daily) == 2
+    for layout in daily:
+        axis = layout["xaxis"]
         assert axis["ticktext"] == ["2026-11-12"] and axis["type"] == "category"
     app.radio[0].set_value("AI analyst").run()
     app.button[0].click().run()
