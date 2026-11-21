@@ -17,13 +17,21 @@ st.set_page_config(
 )
 st.markdown(
     """<style>
-.stApp{background:#f7f9fc;color:#182a40} [data-testid=stSidebar]{background:#10263c}
-[data-testid=stSidebar] h2,[data-testid=stSidebar] p,[data-testid=stSidebar] label{color:#ebf4ff}
-[data-testid=stSidebar] [data-baseweb=select] *{color:#172e44}
-h1,h2,h3{letter-spacing:-.035em}
-[data-testid=stMetric]{background:white;border:1px solid #d8e2ec;border-top:3px solid #16857a;
-border-radius:10px;padding:16px 18px;height:100%}
-.block-container{max-width:1420px;padding-top:3rem}
+[data-testid="stMainMenu"], #MainMenu {display:none !important}
+[data-testid="stMainBlockContainer"] {max-width:1240px;padding-top:2.6rem}
+h1,h2,h3 {letter-spacing:-.035em}
+[data-testid="stMetric"] {background:#fff;border:1px solid #d6e3e0;border-top:3px solid #13796a;
+    border-radius:12px;padding:.85rem 1rem;height:100%}
+[data-testid="stPlotlyChart"] {background:white;border:1px solid #d6e3e0;border-radius:12px;overflow:hidden}
+[data-testid="stExpander"] {background:#fff;border-radius:10px}
+[data-testid="stSidebar"] [data-testid="stExpander"] {background:transparent}
+.st-key-answer_summary {background:#edf6f3;border-left:4px solid #13796a;
+    padding:1rem 1.25rem;border-radius:8px}
+[data-testid="stSidebar"] a {color:#b4e6df}
+@media(max-width:700px) {
+    [data-testid="stMainBlockContainer"] {padding-top:2rem}
+    .st-key-answer_summary {padding:.75rem 1rem}
+}
 </style>""",
     unsafe_allow_html=True,
 )
@@ -58,8 +66,7 @@ except (OSError, sqlite3.Error):
     st.stop()
 
 with st.sidebar:
-    st.header("◈  PaySight AI")
-    st.caption("Enterprise payments intelligence")
+    st.header("PaySight AI", anchor=False)
     page = st.radio("Workspace", ["Overview", "AI analyst"])
     st.divider()
     selected = st.date_input(
@@ -73,8 +80,8 @@ with st.sidebar:
     with st.expander("Metric definitions"):
         for label, _, definition in METRICS.values():
             st.caption(f"{label} · {definition}")
-    st.caption(f"Synthetic snapshot · {START:%d %b %Y} – {END:%d %b %Y}")
-    st.markdown("[About and download the dataset](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/tree/main/data)")
+    st.caption(f"Synthetic data · {START:%d %b %Y} – {END:%d %b %Y}")
+    st.markdown("[Dataset and definitions](https://github.com/subhamghoshkgp/paysight-ai-enterprise-analyst/tree/main/data)")
 if len(selected) != 2:
     st.info("Choose both the start and end dates.")
     st.stop()
@@ -90,10 +97,12 @@ def scope_label(p):
     return " · ".join(f"{k.title()} = {', '.join(v)}" for k, v in p.filters) or "All eligible attempts"
 
 
-def claim_evidence(r, index):
-    dim, period, segment = r["sources"][index]
-    trace = next(t for t in r["traces"] if t["dimension"] == dim)
-    with st.expander(f"View evidence · Finding {index + 1} · {trace['id']}"):
+def claim_evidence(r):
+    with st.expander("View evidence by finding"):
+        index = st.selectbox("Finding", range(len(r["facts"])),
+                             format_func=lambda i: r["facts"][i])
+        dim, period, segment = r["sources"][index]
+        trace = next(t for t in r["traces"] if t["dimension"] == dim)
         p = r["plan"]
         st.caption(f"Source: eligible · {scope_label(p)} · Current {p.start} to {p.end}")
         if p.intent != "summary" and period is None:
@@ -113,9 +122,11 @@ def claim_evidence(r, index):
         st.write("Bound parameters", trace["parameters"])
 
 
-def evidence(r):
+def evidence(r, route=None):
     p = r["plan"]
-    with st.expander("Query evidence · SQL, parameters and returned rows"):
+    with st.expander("Query evidence"):
+        if route:
+            st.caption(f"Analysis method · {route}")
         st.write(
             "Sources: raw_transactions → attempts → eligible, joined to banks and merchants."
         )
@@ -156,10 +167,10 @@ def chart(df, x, y, title, unit, line=False, color=None):
         paper_bgcolor="white",
         title_font_size=17,
         showlegend=bool(color),
-        legend_orientation="h",
+        legend=dict(orientation="h", yanchor="top", y=-0.2, x=0),
     )
     fig.update_yaxes(rangemode="tozero", gridcolor="#e9edf2")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False, "scrollZoom": False})
 
 
 def cohort_quality(r):
@@ -168,16 +179,16 @@ def cohort_quality(r):
     text = f"Selected cohort: {missing:,} of {failures:,} failed attempts have a missing reason."
     if missing:
         st.warning(text + " They count toward the failure rate and appear under Unknown in the reason breakdown.")
-    else:
-        st.caption(text)
 
 
 def caveats(r):
     cohort_quality(r)
     n = int(r["grouped"].attempts.min())
-    st.caption(
-        f"Snapshot quality: {len(report['Duplicates'])} duplicate copies removed · {report['Pending']} pending attempts excluded · {len(report['Missing failure reasons'])} missing decline reasons retained as Unknown. Smallest returned group: {n:,} eligible attempts. These are descriptive snapshot measurements. Small cohorts can fluctuate sharply."
-    )
+    with st.expander("Coverage and caveats"):
+        st.write(f"The smallest returned group contains {n:,} eligible attempts. Rates in small cohorts can fluctuate sharply.")
+        st.write(f"Across the full dataset, {len(report['Duplicates']):,} duplicate copies were removed and {report['Pending']:,} pending attempts were excluded. "
+                 f"{len(report['Missing failure reasons']):,} failures have an unknown reason.")
+
 
 
 try:
@@ -275,24 +286,27 @@ try:
             )
     else:
         st.title("AI analyst")
-        st.caption("Lookups and comparisons run directly in SQL. For a why question, Groq explains the SQL findings.")
 
         def use_example():
-            st.session_state.question = st.session_state.example
+            if st.session_state.example:
+                st.session_state.question = st.session_state.example
 
-        st.selectbox(
-            "Example investigations", QUESTIONS, key="example", on_change=use_example
-        )
-        question = st.text_input(
-            "Business question", value=QUESTIONS[0], key="question", max_chars=700
-        )
-        ranking = None
-        if ambiguous_bank_ranking(question):
-            ranking = st.radio(
-                "How should banks be ranked?", ["Lowest success rate", "Most failed attempts"],
-                index=None, key="ranking_basis",
+        with st.container(border=True):
+            question = st.text_input(
+                "Business question", value=QUESTIONS[0], key="question", max_chars=700
             )
-        submit = st.button("Run analysis", type="primary")
+            ranking = None
+            if ambiguous_bank_ranking(question):
+                ranking = st.radio(
+                    "How should banks be ranked?", ["Lowest success rate", "Most failed attempts"],
+                    index=None, key="ranking_basis",
+                )
+            actions, examples = st.columns([1, 3], vertical_alignment="bottom")
+            submit = actions.button("Run analysis", type="primary", width="stretch")
+            examples.selectbox(
+                "Example questions", QUESTIONS, index=None, placeholder="Browse example questions",
+                label_visibility="collapsed", key="example", on_change=use_example,
+            )
         context = (ANALYSIS_VERSION, question, selected, filters, ranking)
         answer = st.session_state.get("answer")
         if answer and (not isinstance(answer, dict) or answer.get("context") != context):
@@ -326,12 +340,13 @@ try:
             if ranking:
                 prompt = question.lower().replace("performed", "").replace("performing", "").replace("worst", "")
                 prompt = prompt + (" lowest success rate" if ranking == "Lowest success rate" else " most failed attempts")
-            with st.spinner("Resolving the question and running validated queries…"):
+            with st.spinner("Analyzing payments…"):
                 explain = needs_explanation(prompt)
                 plan = interpret(prompt, start, end)
                 save_result(plan, question, explain)
         answer = st.session_state.get("answer")
         if answer:
+            results_panel = st.container()
             with st.form("followup_form", clear_on_submit=True):
                 follow = st.text_input("Follow-up question", placeholder="Within UPI, which bank contributed most?", max_chars=700)
                 drill = st.form_submit_button("Run follow-up")
@@ -343,68 +358,67 @@ try:
                     answer = st.session_state.answer
                 except ValueError as exc:
                     st.warning(f"Follow-up could not run. {exc} Showing the last completed analysis.")
-            r, brief = answer["result"], answer["brief"]
-            p = r["plan"]
-            st.subheader("Executive summary")
-            st.caption(answer["prompt"])
-            st.write(brief or r["facts"][0])
-            st.caption(f"{p.start} – {p.end} · {scope_label(p)} · {answer['planner']} · {METRICS[p.metric][2]}")
-            if answer["warning"]:
-                st.warning(answer["warning"] + " Showing executed results.")
-            if p.intent != "summary":
-                st.caption(
-                    f"Compared with {p.previous} – {p.start - timedelta(days=1)}"
+            with results_panel:
+                r, brief = answer["result"], answer["brief"]
+                p = r["plan"]
+                summary = brief or r["facts"][0]
+                with st.container(key="answer_summary"):
+                    st.subheader("Executive summary", anchor=False)
+                    if answer["prompt"] != question:
+                        st.caption(answer["prompt"])
+                    st.write(summary)
+                    st.caption(f"{p.start:%d %b %Y} – {p.end:%d %b %Y} · {scope_label(p)}")
+                    if p.intent != "summary":
+                        earlier_end = p.start - timedelta(days=1)
+                        st.caption(f"Compared with {p.previous:%d %b} – {earlier_end:%d %b %Y}")
+                if answer["warning"]:
+                    st.warning(answer["warning"] + " Showing verified findings.")
+                remaining = [fact for fact in r["facts"] if fact not in summary]
+                if remaining:
+                    st.subheader("Observed findings", anchor=False)
+                    for fact in remaining:
+                        st.write(f"• {fact}")
+                frame = (
+                    r["grouped"].sort_values(p.metric, ascending=p.ascending)
+                    if p.dimension not in ("day", "month")
+                    else r["grouped"]
                 )
-            st.subheader("Observed facts")
-            for index, fact in enumerate(r["facts"]):
-                st.write(f"{index + 1}. {fact}")
-                claim_evidence(r, index)
-            frame = (
-                r["grouped"].sort_values(p.metric, ascending=p.ascending)
-                if p.dimension not in ("day", "month")
-                else r["grouped"]
-            )
-            chart(
-                frame,
-                "segment",
-                p.metric,
-                METRICS[p.metric][0],
-                METRICS[p.metric][1],
-                p.dimension in ("day", "month"),
-                "period" if p.intent != "summary" else None,
-            )
-            st.dataframe(
-                frame[
-                    ["period", "segment", "attempts", "successes", p.metric]
-                    if p.metric not in ("attempts", "successes")
-                    else ["period", "segment", "attempts", "successes"]
-                ],
-                hide_index=True,
-            )
-            if r["lenses"]:
-                st.subheader("What drove the change?")
-                st.caption(
-                    "Each tab explains the same selected cohort change from a different angle. Contributions across tabs overlap."
-                )
-                for tab, (dim, table) in zip(
-                    st.tabs(["Payment method", "Bank", "Merchant category", "Region"]),
-                    r["lenses"].items(),
-                ):
-                    with tab:
-                        effects = table[["Mix (pp)", "Within (pp)"]].sum()
-                        st.write(
-                            f"Mix {effects.iloc[0]:+.2f} pp  ·  Within segments {effects.iloc[1]:+.2f} pp"
-                        )
-                        st.dataframe(table.style.format(precision=2), width="stretch")
-            if answer["explain"]:
-                a, b = st.columns(2)
-                with a:
-                    st.subheader("Hypothesis")
-                    st.write(r["hypothesis"])
-                with b:
-                    st.subheader("Recommended action")
-                    st.write(r["action"])
-            caveats(r)
-            evidence(r)
+                if p.dimension != "all" or p.intent != "summary":
+                    chart(
+                        frame,
+                        "segment",
+                        p.metric,
+                        METRICS[p.metric][0],
+                        METRICS[p.metric][1],
+                        p.dimension in ("day", "month"),
+                        "period" if p.intent != "summary" else None,
+                    )
+                if r["lenses"]:
+                    st.subheader("What drove the change?")
+                    st.caption(
+                        "Each breakdown explains the same change. Contributions across tabs overlap."
+                    )
+                    for tab, (dim, table) in zip(
+                        st.tabs(["Payment method", "Bank", "Merchant category", "Region"]),
+                        r["lenses"].items(),
+                    ):
+                        with tab:
+                            effects = table[["Mix (pp)", "Within (pp)"]].sum()
+                            st.write(
+                                f"Mix {effects.iloc[0]:+.2f} pp  ·  Within segments {effects.iloc[1]:+.2f} pp"
+                            )
+                            display = table[["Previous rate (%)", "Current rate (%)", "Mix (pp)", "Within (pp)", "Total (pp)"]]
+                            st.dataframe(display.rename_axis(dim.title()).style.format(precision=2, na_rep="—"), width="stretch")
+                if answer["explain"]:
+                    a, b = st.columns(2)
+                    with a:
+                        st.subheader("Hypothesis")
+                        st.write(r["hypothesis"])
+                    with b:
+                        st.subheader("Recommended action")
+                        st.write(r["action"])
+                caveats(r)
+                claim_evidence(r)
+                evidence(r, answer["planner"])
 except (ValueError, pd.errors.DatabaseError) as exc:
     st.error(str(exc))
