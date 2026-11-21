@@ -78,3 +78,20 @@ def test_groq_rate_limit(monkeypatch):
     monkeypatch.setattr("paysight.model.urlopen", limited)
     with pytest.raises(ValueError, match="rate limit"):
         model_plan("Last week's success rate?", END, END, "Groq")
+
+
+def test_calendar_lookup_and_explanation_routes():
+    from datetime import date
+
+    from paysight.plans import needs_explanation
+
+    lookup = "How many transactions were processed last month?"
+    assert not needs_explanation(lookup)
+    p = interpret(lookup, END, END)
+    assert (p.metric, p.start, p.end) == ("attempts", date(2026, 10, 1), date(2026, 10, 31))
+    march = interpret("What was our overall success rate in March 2026?", END, END)
+    assert (march.start, march.end) == (date(2026, 3, 1), date(2026, 3, 31))
+    why = "Why did the UPI success rate decrease?"
+    assert needs_explanation(why)
+    assert interpret(why, END, END).intent == "investigate"
+    assert interpret("Why did failures increase?", END, END).intent == "compare"

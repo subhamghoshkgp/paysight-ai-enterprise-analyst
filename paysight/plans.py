@@ -139,7 +139,11 @@ def interpret(question, start, end):
     # A bounded vocabulary prevents unknown cohort names from silently becoming portfolio queries.
     words = set(re.findall(r"[a-z]+", q))
     known = set(re.findall(r"[a-z]+", " ".join(QUESTIONS).lower()))
-    known.update("increase increased spike rose rise fall fell go down up behind drove cause causes failing why monthly lower higher".split())
+    known.update(
+        "overall processed recorded had happen happened increasing decreasing decrease "
+        "decreased increase increased spike rose rise fall fell go down up behind drove "
+        "cause causes failing why monthly lower higher high low".split()
+    )
     known.update(
         ["a", "an", "all", "at", "on", "in", "of", "between", "from", "through", "to", "by", "during", "per", "how", "many", "count", "counts", "total", "eligible", "successful", "successes", "attempts", "average", "mean", "gross", "value", "values", "atv", "gtv", "show", "me", "give", "us", "list", "rank", "ranked", "lowest", "highest", "worst", "best", "bottom", "smallest", "each", "day", "days", "trend", "over", "time", "past", "seven", "prior", "previous", "period", "week", "weeks", "versus", "vs", "compared", "compare", "change", "changed", "explain", "investigate", "caused", "approval", "percentage", "performance", "declined", "failed", "reason", "reasons", "region", "regionwide", "method", "methods", "bank", "segment", "segments", "category", "transaction", "merchant", "daily", "what", "which", "is", "are", "did", "does", "was", "were", "and", "for", "with", "please", "as", "paid", "payments", "most", "fewest", "largest", "top", "across", "more", "less", "fall", "drop", "decreasing", "dropped"]
     )
@@ -230,8 +234,9 @@ def interpret(question, start, end):
     )
     if needs_explanation(q) and metric == "failures" and dim == "all" and not comparison:
         dim = "reason"
-    if needs_explanation(q) and dim != "reason":
-        comparison = True
+    if needs_explanation(q):
+        movement = re.search(r"\b(increas\w*|decreas\w*|rose|fell|dropped|spike|changed?)\b", q)
+        comparison = comparison or dim != "reason" or bool(movement)
     if dim == "all" and re.search(r"\bby\b", q):
         raise ValueError(
             "Choose a supported breakdown: bank, method, region, category or day."
